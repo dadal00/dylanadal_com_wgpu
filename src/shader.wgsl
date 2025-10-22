@@ -94,8 +94,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let object_normal: vec4<f32> = textureSample(t_normal, s_normal, in.tex_coords);
     
     // We don't need (or want) much ambient light, so 0.1 is fine
-    let ambient_strength = 0.3;
-    let ambient_color = light.color * ambient_strength;
+    // let ambient_strength = 0.0;
+    // let ambient_color = light.color * ambient_strength;
 
     // Create the lighting vectors
     let tangent_normal = object_normal.xyz * 2.0 - 1.0;
@@ -109,7 +109,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
     let specular_color = specular_strength * light.color;
 
-    let result = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+    // let result = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+    let result = (diffuse_color + specular_color) * object_color.xyz;
 
     return vec4<f32>(result, object_color.a);
 }

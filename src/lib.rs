@@ -146,7 +146,6 @@ pub struct State {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     instances: Vec<Instance>,
-    #[allow(dead_code)]
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     is_surface_configured: bool,
@@ -154,8 +153,7 @@ pub struct State {
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
     light_render_pipeline: wgpu::RenderPipeline,
-    #[allow(dead_code)]
-    debug_material: model::Material,
+    // debug_material: model::Material,
     // NEW!
     mouse_pressed: bool,
     hdr: hdr::HdrPipeline,
@@ -325,7 +323,6 @@ impl State {
                 label: Some("texture_bind_group_layout"),
             });
 
-        // UPDATED!
         let camera = camera::Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
         let projection =
             camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
@@ -397,7 +394,7 @@ impl State {
         });
 
         let obj_model =
-            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
+            resources::load_model("block.obj", &device, &queue, &texture_bind_group_layout)
                 .await
                 .unwrap();
 
@@ -491,35 +488,35 @@ impl State {
             )
         };
 
-        let debug_material = {
-            let diffuse_bytes = include_bytes!("../res/cobble-diffuse.png");
-            let normal_bytes = include_bytes!("../res/cobble-normal.png");
+        // let debug_material = {
+        //     let diffuse_bytes = include_bytes!("../res/cobble-diffuse.png");
+        //     let normal_bytes = include_bytes!("../res/cobble-normal.png");
 
-            let diffuse_texture = texture::Texture::from_bytes(
-                &device,
-                &queue,
-                diffuse_bytes,
-                "res/alt-diffuse.png",
-                false,
-            )
-            .unwrap();
-            let normal_texture = texture::Texture::from_bytes(
-                &device,
-                &queue,
-                normal_bytes,
-                "res/alt-normal.png",
-                true,
-            )
-            .unwrap();
+        //     let diffuse_texture = texture::Texture::from_bytes(
+        //         &device,
+        //         &queue,
+        //         diffuse_bytes,
+        //         "res/alt-diffuse.png",
+        //         false,
+        //     )
+        //     .unwrap();
+        //     let normal_texture = texture::Texture::from_bytes(
+        //         &device,
+        //         &queue,
+        //         normal_bytes,
+        //         "res/alt-normal.png",
+        //         true,
+        //     )
+        //     .unwrap();
 
-            model::Material::new(
-                &device,
-                "alt-material",
-                diffuse_texture,
-                normal_texture,
-                &texture_bind_group_layout,
-            )
-        };
+        //     model::Material::new(
+        //         &device,
+        //         "alt-material",
+        //         diffuse_texture,
+        //         normal_texture,
+        //         &texture_bind_group_layout,
+        //     )
+        // };
 
         Ok(Self {
             window,
@@ -543,7 +540,7 @@ impl State {
             light_buffer,
             light_bind_group,
             light_render_pipeline,
-            debug_material,
+            // debug_material,
             // NEW!
             mouse_pressed: false,
             hdr,
