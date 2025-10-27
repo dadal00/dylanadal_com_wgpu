@@ -36,7 +36,6 @@ impl CameraUniform {
         }
     }
 
-    // UPDATED!
     fn update_view_proj(&mut self, camera: &camera::Camera, projection: &camera::Projection) {
         self.view_position = camera.position.to_homogeneous().into();
         self.view_proj = (projection.calc_matrix() * camera.calc_matrix()).into()
@@ -46,14 +45,21 @@ impl CameraUniform {
 struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
+    scale: cgmath::Vector3<f32>,
 }
 
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
+        let scale_matrix =
+            cgmath::Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
+
+        let rotation_matrix = cgmath::Matrix4::from(self.rotation);
+        let translation_matrix = cgmath::Matrix4::from_translation(self.position);
+
+        let model_matrix = translation_matrix * rotation_matrix * scale_matrix;
+
         InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position)
-                * cgmath::Matrix4::from(self.rotation))
-            .into(),
+            model: model_matrix.into(),
             normal: cgmath::Matrix3::from(self.rotation).into(),
         }
     }
@@ -61,7 +67,6 @@ impl Instance {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-#[allow(dead_code)]
 struct InstanceRaw {
     model: [[f32; 4]; 4],
     normal: [[f32; 3]; 3],
@@ -138,10 +143,11 @@ pub struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
+    light_model: model::Model,
     obj_model: model::Model,
-    camera: camera::Camera,                      // UPDATED!
-    projection: camera::Projection,              // NEW!
-    camera_controller: camera::CameraController, // UPDATED!
+    camera: camera::Camera,
+    projection: camera::Projection,
+    camera_controller: camera::CameraController,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -190,15 +196,12 @@ fn create_render_pipeline(
             compilation_options: Default::default(),
         }),
         primitive: wgpu::PrimitiveState {
-            topology, // NEW!
+            topology,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
-            // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+            cull_mode: None,
             polygon_mode: wgpu::PolygonMode::Fill,
-            // Requires Features::DEPTH_CLIP_CONTROL
             unclipped_depth: false,
-            // Requires Features::CONSERVATIVE_RASTERIZATION
             conservative: false,
         },
         depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
@@ -213,8 +216,6 @@ fn create_render_pipeline(
             mask: !0,
             alpha_to_coverage_enabled: false,
         },
-        // If the pipeline will be used with a multiview render pass, this
-        // indicates how many array layers the attachments will have.
         multiview: None,
         cache: None,
     })
@@ -224,8 +225,6 @@ impl State {
     async fn new(window: Arc<Window>) -> anyhow::Result<State> {
         let size = window.inner_size();
 
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
@@ -263,9 +262,7 @@ impl State {
             .unwrap();
 
         let surface_caps = surface.get_capabilities(&adapter);
-        // Shader code in this tutorial assumes an Srgb surface texture. Using a different
-        // one will result all the colors comming out darker. If you want to support non
-        // Srgb surfaces, you'll need to account for that when drawing to the frame.
+
         let surface_format = surface_caps
             .formats
             .iter()
@@ -302,7 +299,6 @@ impl State {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
-                    // normal map
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -337,30 +333,15 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        const SPACE_BETWEEN: f32 = 2.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-
-                    let position = cgmath::Vector3 { x, y: 0.0, z };
-
-                    let rotation = cgmath::Quaternion::one();
-
-                    // let rotation = if position.is_zero() {
-                    //     cgmath::Quaternion::from_axis_angle(
-                    //         cgmath::Vector3::unit_z(),
-                    //         cgmath::Deg(0.0),
-                    //     )
-                    // } else {
-                    //     cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    // };
-
-                    Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<_>>();
+        let instances = vec![Instance {
+            position: cgmath::Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            rotation: cgmath::Quaternion::one(),
+            scale: cgmath::Vector3::new(10.0, 1.0, 10.0),
+        }];
 
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -393,10 +374,19 @@ impl State {
             label: Some("camera_bind_group"),
         });
 
-        let obj_model =
-            resources::load_model("block.obj", &device, &queue, &texture_bind_group_layout)
-                .await
-                .unwrap();
+        let light_model = resources::create_sphere(
+            &device,
+            &queue,
+            &texture_bind_group_layout,
+            1.0, // radius
+            32,  // latitude segments
+            32,  // longitude segments
+        );
+
+        let obj_model = resources::create_plane(&device, &queue, &texture_bind_group_layout);
+        // resources::load_model("block.obj", &device, &queue, &texture_bind_group_layout)
+        //     .await
+        //     .unwrap();
 
         let light_uniform = LightUniform {
             position: [2.0, 2.0, 2.0],
@@ -488,36 +478,6 @@ impl State {
             )
         };
 
-        // let debug_material = {
-        //     let diffuse_bytes = include_bytes!("../res/cobble-diffuse.png");
-        //     let normal_bytes = include_bytes!("../res/cobble-normal.png");
-
-        //     let diffuse_texture = texture::Texture::from_bytes(
-        //         &device,
-        //         &queue,
-        //         diffuse_bytes,
-        //         "res/alt-diffuse.png",
-        //         false,
-        //     )
-        //     .unwrap();
-        //     let normal_texture = texture::Texture::from_bytes(
-        //         &device,
-        //         &queue,
-        //         normal_bytes,
-        //         "res/alt-normal.png",
-        //         true,
-        //     )
-        //     .unwrap();
-
-        //     model::Material::new(
-        //         &device,
-        //         "alt-material",
-        //         diffuse_texture,
-        //         normal_texture,
-        //         &texture_bind_group_layout,
-        //     )
-        // };
-
         Ok(Self {
             window,
             surface,
@@ -525,6 +485,7 @@ impl State {
             queue,
             config,
             render_pipeline,
+            light_model,
             obj_model,
             camera,
             projection,
@@ -540,15 +501,12 @@ impl State {
             light_buffer,
             light_bind_group,
             light_render_pipeline,
-            // debug_material,
-            // NEW!
             mouse_pressed: false,
             hdr,
         })
     }
 
     fn resize(&mut self, width: u32, height: u32) {
-        // UPDATED!
         if width > 0 && height > 0 {
             self.projection.resize(width, height);
             self.hdr.resize(&self.device, width, height);
@@ -561,7 +519,6 @@ impl State {
         }
     }
 
-    // UPDATED!
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: KeyCode, pressed: bool) {
         if !self.camera_controller.handle_key(key, pressed) {
             match (key, pressed) {
@@ -571,7 +528,6 @@ impl State {
         }
     }
 
-    // NEW!
     fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
         match button {
             MouseButton::Left => self.mouse_pressed = pressed,
@@ -579,13 +535,11 @@ impl State {
         }
     }
 
-    // NEW!
     fn handle_mouse_scroll(&mut self, delta: &MouseScrollDelta) {
         self.camera_controller.handle_scroll(delta);
     }
 
     fn update(&mut self, dt: std::time::Duration) {
-        // UPDATED!
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
@@ -595,7 +549,6 @@ impl State {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
-        // Update the light
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
         self.light_uniform.position = (cgmath::Quaternion::from_axis_angle(
             (0.0, 1.0, 0.0).into(),
@@ -612,7 +565,6 @@ impl State {
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.window.request_redraw();
 
-        // We can't render unless the surface is configured
         if !self.is_surface_configured {
             return Ok(());
         }
@@ -660,7 +612,7 @@ impl State {
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.light_render_pipeline);
             render_pass.draw_light_model(
-                &self.obj_model,
+                &self.light_model,
                 &self.camera_bind_group,
                 &self.light_bind_group,
             );

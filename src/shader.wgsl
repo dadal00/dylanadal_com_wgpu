@@ -93,23 +93,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, in.tex_coords);
     let object_normal: vec4<f32> = textureSample(t_normal, s_normal, in.tex_coords);
     
-    // We don't need (or want) much ambient light, so 0.1 is fine
-    // let ambient_strength = 0.1;
-    // let ambient_color = light.color * ambient_strength;
-
-    // Create the lighting vectors
     let tangent_normal = object_normal.xyz * 2.0 - 1.0;
-    let light_dir = normalize(in.tangent_light_position - in.tangent_position);
-    // let view_dir = normalize(in.tangent_view_position - in.tangent_position);
-    // let half_dir = normalize(view_dir + light_dir);
 
-    let diffuse_strength = max(dot(tangent_normal, light_dir), 0.0);
-    let diffuse_color = light.color * diffuse_strength;
+    let light_vec = in.tangent_light_position - in.tangent_position;
+    let light_distance = length(light_vec);
+    let light_dir = normalize(light_vec);
 
-    // let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
-    // let specular_color = specular_strength * light.color;
+    let attenuation = 1.0 / (1.0 + 0.09 * light_distance + 0.032 * light_distance * light_distance);
+    let focused_attenuation = pow(attenuation, 2.0);
 
-    // let result = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+    let diffuse_color = light.color * focused_attenuation;
+
     let result = diffuse_color * object_color.xyz;
 
     return vec4<f32>(result, object_color.a);

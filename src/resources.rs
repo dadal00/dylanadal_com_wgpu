@@ -1,3 +1,4 @@
+use model::{Material, Mesh, Model, ModelVertex};
 use std::io::{BufReader, Cursor};
 
 use wgpu::util::DeviceExt;
@@ -211,4 +212,180 @@ pub async fn load_model(
         .collect::<Vec<_>>();
 
     Ok(model::Model { meshes, materials })
+}
+
+pub fn create_plane(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> model::Model {
+    let vertices = vec![
+        ModelVertex {
+            position: [-1.0, 0.0, -1.0],
+            tex_coords: [0.0, 1.0],
+            normal: [0.0, 1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        ModelVertex {
+            position: [1.0, 0.0, -1.0],
+            tex_coords: [1.0, 1.0],
+            normal: [0.0, 1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        ModelVertex {
+            position: [1.0, 0.0, 1.0],
+            tex_coords: [1.0, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        ModelVertex {
+            position: [-1.0, 0.0, 1.0],
+            tex_coords: [0.0, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+    ];
+
+    let indices: Vec<u32> = vec![0, 1, 2, 0, 2, 3];
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Plane Vertex Buffer"),
+        contents: bytemuck::cast_slice(&vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Plane Index Buffer"),
+        contents: bytemuck::cast_slice(&indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+
+    let white_texture = crate::texture::Texture::from_color(
+        device,
+        queue,
+        [255, 255, 255, 255],
+        Some("Plane texture"),
+    );
+    let material = Material::new(
+        device,
+        "white_material",
+        white_texture.clone(),
+        white_texture,
+        layout,
+    );
+
+    let mesh = Mesh {
+        name: "plane".to_string(),
+        vertex_buffer,
+        index_buffer,
+        num_elements: indices.len() as u32,
+        material: 0,
+    };
+
+    Model {
+        meshes: vec![mesh],
+        materials: vec![material],
+    }
+}
+
+pub fn create_sphere(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    radius: f32,
+    latitude_segments: u32,
+    longitude_segments: u32,
+) -> model::Model {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    for y in 0..=latitude_segments {
+        let theta = y as f32 / latitude_segments as f32 * std::f32::consts::PI;
+        let sin_theta = theta.sin();
+        let cos_theta = theta.cos();
+
+        for x in 0..=longitude_segments {
+            let phi = x as f32 / longitude_segments as f32 * 2.0 * std::f32::consts::PI;
+            let sin_phi = phi.sin();
+            let cos_phi = phi.cos();
+
+            let position = [
+                radius * sin_theta * cos_phi,
+                radius * cos_theta,
+                radius * sin_theta * sin_phi,
+            ];
+            let normal = [sin_theta * cos_phi, cos_theta, sin_theta * sin_phi];
+            let tex_coords = [
+                x as f32 / longitude_segments as f32,
+                1.0 - y as f32 / latitude_segments as f32,
+            ];
+            // tangent and bitangent can be approximated or calculated more accurately
+            let tangent = [-sin_phi, 0.0, cos_phi];
+            let bitangent = [cos_theta * cos_phi, -sin_theta, cos_theta * sin_phi];
+
+            vertices.push(ModelVertex {
+                position,
+                normal,
+                tex_coords,
+                tangent,
+                bitangent,
+            });
+        }
+    }
+
+    for y in 0..latitude_segments {
+        for x in 0..longitude_segments {
+            let a = y * (longitude_segments + 1) + x;
+            let b = a + longitude_segments + 1;
+
+            indices.push(a);
+            indices.push(b);
+            indices.push(a + 1);
+
+            indices.push(b);
+            indices.push(b + 1);
+            indices.push(a + 1);
+        }
+    }
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Sphere Vertex Buffer"),
+        contents: bytemuck::cast_slice(&vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Sphere Index Buffer"),
+        contents: bytemuck::cast_slice(&indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+
+    let white_texture = crate::texture::Texture::from_color(
+        device,
+        queue,
+        [255, 255, 255, 255],
+        Some("Sphere texture"),
+    );
+    let material = Material::new(
+        device,
+        "white_material",
+        white_texture.clone(),
+        white_texture,
+        layout,
+    );
+
+    let mesh = Mesh {
+        name: "sphere".to_string(),
+        vertex_buffer,
+        index_buffer,
+        num_elements: indices.len() as u32,
+        material: 0,
+    };
+
+    Model {
+        meshes: vec![mesh],
+        materials: vec![material],
+    }
 }
