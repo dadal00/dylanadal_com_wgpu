@@ -19,6 +19,8 @@ mod texture;
 
 use model::{DrawLight, DrawModel, Vertex};
 
+const MAX_LIGHTS: usize = 10;
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
@@ -117,6 +119,14 @@ impl model::Vertex for InstanceRaw {
     }
 }
 
+struct Light {
+    pos: glam::Vec3,
+    color: wgpu::Color,
+    fov: f32,
+    depth: std::ops::Range<f32>,
+    target_view: Option<wgpu::TextureView>,
+}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct LightUniform {
@@ -124,6 +134,31 @@ struct LightUniform {
     _padding: u32,
     color: [f32; 3],
     _padding2: u32,
+    proj: [[f32; 4]; 4],
+}
+
+impl Light {
+    fn to_raw(&self) -> LightUniform {
+        let view = glam::Mat4::look_at_rh(self.pos, glam::Vec3::ZERO, glam::Vec3::Z);
+        let projection = glam::Mat4::perspective_rh(
+            self.fov * std::f32::consts::PI / 180.,
+            1.0,
+            self.depth.start,
+            self.depth.end,
+        );
+        let view_proj = projection * view;
+        LightUniform {
+            proj: view_proj.to_cols_array_2d(),
+            position: [self.pos.x, self.pos.y, self.pos.z],
+            _padding: 0,
+            color: [
+                self.color.r as f32,
+                self.color.g as f32,
+                self.color.b as f32,
+            ],
+            _padding2: 0,
+        }
+    }
 }
 
 pub struct State {
@@ -150,7 +185,8 @@ pub struct State {
     depth_texture: texture::Texture,
     is_surface_configured: bool,
 
-    light_uniform: LightUniform,
+    lights: Vec<Light>,
+    // light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
     light_render_pipeline: wgpu::RenderPipeline,
@@ -371,17 +407,50 @@ impl State {
 
         let obj_model = resources::create_plane(&device, &queue, &texture_bind_group_layout);
 
-        let light_uniform = LightUniform {
-            position: [2.0, 2.0, 2.0],
-            _padding: 0,
-            color: [1.0, 1.0, 1.0],
-            _padding2: 0,
-        };
+        let lights = vec![
+            Light {
+                pos: glam::Vec3::new(2.0, 2.0, 2.0),
+                color: wgpu::Color {
+                    r: 0.5,
+                    g: 1.0,
+                    b: 0.5,
+                    a: 1.0,
+                },
+                fov: 60.0,
+                depth: 1.0..20.0,
+                target_view: None,
+            },
+            Light {
+                pos: glam::Vec3::new(-2.0, 2.0, -2.0),
+                color: wgpu::Color {
+                    r: 1.0,
+                    g: 0.5,
+                    b: 0.5,
+                    a: 1.0,
+                },
+                fov: 45.0,
+                depth: 1.0..20.0,
+                target_view: None,
+            },
+        ];
 
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light VB"),
-            contents: bytemuck::cast_slice(&[light_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        // let light_uniform = LightUniform {
+        //     position: [2.0, 2.0, 2.0],
+        //     _padding: 0,
+        //     color: [1.0, 1.0, 1.0],
+        //     _padding2: 0,
+        //     proj: [[0.0; 4]; 4],
+        // };
+
+        let light_uniforms_size = (MAX_LIGHTS * size_of::<LightUniform>()) as wgpu::BufferAddress;
+
+        let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Light Buffer"),
+            size: light_uniforms_size,
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         let light_bind_group_layout =
@@ -392,7 +461,7 @@ impl State {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size: wgpu::BufferSize::new(light_uniforms_size),
                     },
                     count: None,
                 }],
@@ -416,6 +485,23 @@ impl State {
         );
 
         let hdr = hdr::HdrPipeline::new(&device, &config);
+
+        // let shadow_texture =
+        //     texture::Texture::create_depth_texture(&device, 1024, 1024, "shadow_texture");
+
+        // let mut shadow_target_views = [Some(shadow_texture.texture.create_view(
+        //     &wgpu::TextureViewDescriptor {
+        //         label: Some("shadow"),
+        //         format: None,
+        //         dimension: Some(wgpu::TextureViewDimension::D2),
+        //         usage: None,
+        //         aspect: wgpu::TextureAspect::All,
+        //         base_mip_level: 0,
+        //         mip_level_count: None,
+        //         base_array_layer: 0,
+        //         array_layer_count: Some(1),
+        //     },
+        // ))];
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -489,7 +575,8 @@ impl State {
             depth_texture,
             is_surface_configured: false,
 
-            light_uniform,
+            lights,
+            // light_uniform,
             light_buffer,
             light_bind_group,
             light_render_pipeline,
@@ -546,17 +633,24 @@ impl State {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
-        let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
-        self.light_uniform.position = (cgmath::Quaternion::from_axis_angle(
-            (0.0, 1.0, 0.0).into(),
-            cgmath::Deg(PI * dt.as_secs_f32()),
-        ) * old_position)
-            .into();
-        self.queue.write_buffer(
-            &self.light_buffer,
-            0,
-            bytemuck::cast_slice(&[self.light_uniform]),
-        );
+        for (i, light) in self.lights.iter_mut().enumerate() {
+            let old_pos: cgmath::Vector3<f32> = [light.pos.x, light.pos.y, light.pos.z].into();
+
+            let rotation = cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_y(),
+                cgmath::Deg(PI * dt.as_secs_f32()),
+            );
+
+            let new_pos = rotation * old_pos;
+
+            light.pos = [new_pos[0], new_pos[1], new_pos[2]].into();
+
+            self.queue.write_buffer(
+                &self.light_buffer,
+                (i * size_of::<LightUniform>()) as wgpu::BufferAddress,
+                bytemuck::cast_slice(&[light.to_raw()]),
+            );
+        }
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -607,6 +701,7 @@ impl State {
             });
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+
             render_pass.set_pipeline(&self.light_render_pipeline);
             render_pass.draw_light_model(
                 &self.light_model,
