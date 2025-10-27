@@ -75,20 +75,13 @@ impl model::Vertex for InstanceRaw {
         use std::mem;
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
-            // We need to switch from using a step mode of Vertex to Instance
-            // This means that our shaders will only change to use the next
-            // instance when the shader starts processing a new instance
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
                 wgpu::VertexAttribute {
                     offset: 0,
-                    // While our vertex shader only uses locations 0, and 1 now, in later tutorials we'll
-                    // be using 2, 3, and 4, for Vertex. We'll start at slot 5 not conflict with them later
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32x4,
                 },
-                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
-                // for each vec4. We don't have to do this in code though.
                 wgpu::VertexAttribute {
                     offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
                     shader_location: 6,
@@ -128,7 +121,6 @@ impl model::Vertex for InstanceRaw {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct LightUniform {
     position: [f32; 3],
-    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
     _padding: u32,
     color: [f32; 3],
     _padding2: u32,
@@ -140,25 +132,29 @@ pub struct State {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+
     render_pipeline: wgpu::RenderPipeline,
     light_model: model::Model,
     obj_model: model::Model,
+
     camera: camera::Camera,
     projection: camera::Projection,
     camera_controller: camera::CameraController,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
+
     depth_texture: texture::Texture,
     is_surface_configured: bool,
+
     light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
     light_render_pipeline: wgpu::RenderPipeline,
-    // debug_material: model::Material,
-    // NEW!
+
     mouse_pressed: bool,
     hdr: hdr::HdrPipeline,
 }
@@ -205,7 +201,7 @@ fn create_render_pipeline(
         depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
             format,
             depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual, // UDPATED!
+            depth_compare: wgpu::CompareFunction::LessEqual,
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
@@ -246,8 +242,6 @@ impl State {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                // WebGL doesn't support all of wgpu's features, so if
-                // we're building for the web we'll have to disable some.
                 required_limits: if cfg!(target_arch = "wasm32") {
                     wgpu::Limits::downlevel_webgl2_defaults()
                 } else {
@@ -372,19 +366,10 @@ impl State {
             label: Some("camera_bind_group"),
         });
 
-        let light_model = resources::create_sphere(
-            &device,
-            &queue,
-            &texture_bind_group_layout,
-            1.0, // radius
-            32,  // latitude segments
-            32,  // longitude segments
-        );
+        let light_model =
+            resources::create_sphere(&device, &queue, &texture_bind_group_layout, 1.0, 32, 32);
 
         let obj_model = resources::create_plane(&device, &queue, &texture_bind_group_layout);
-        // resources::load_model("block.obj", &device, &queue, &texture_bind_group_layout)
-        //     .await
-        //     .unwrap();
 
         let light_uniform = LightUniform {
             position: [2.0, 2.0, 2.0],
@@ -486,23 +471,29 @@ impl State {
             device,
             queue,
             config,
+
             render_pipeline,
             light_model,
             obj_model,
+
             camera,
             projection,
             camera_controller,
             camera_buffer,
             camera_bind_group,
             camera_uniform,
+
             instances,
             instance_buffer,
+
             depth_texture,
             is_surface_configured: false,
+
             light_uniform,
             light_buffer,
             light_bind_group,
             light_render_pipeline,
+
             mouse_pressed: false,
             hdr,
         })
