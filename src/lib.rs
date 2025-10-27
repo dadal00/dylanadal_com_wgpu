@@ -19,8 +19,6 @@ mod texture;
 
 use model::{DrawLight, DrawModel, Vertex};
 
-const NUM_INSTANCES_PER_ROW: u32 = 10;
-
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
@@ -425,8 +423,12 @@ impl State {
             label: None,
         });
 
-        let depth_texture =
-            texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+        let depth_texture = texture::Texture::create_depth_texture(
+            &device,
+            config.width,
+            config.height,
+            "depth_texture",
+        );
 
         let hdr = hdr::HdrPipeline::new(&device, &config);
 
@@ -514,8 +516,12 @@ impl State {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            self.depth_texture =
-                texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+            self.depth_texture = texture::Texture::create_depth_texture(
+                &self.device,
+                self.config.width,
+                self.config.height,
+                "depth_texture",
+            );
         }
     }
 

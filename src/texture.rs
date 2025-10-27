@@ -3,7 +3,6 @@ use image::GenericImageView;
 
 #[derive(Clone)]
 pub struct Texture {
-    #[allow(unused)]
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
@@ -25,7 +24,6 @@ impl Texture {
             depth_or_array_layers: 1,
         };
 
-        // Create a simple 1x1 RGBA texture
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
@@ -37,7 +35,6 @@ impl Texture {
             view_formats: &[],
         });
 
-        // Upload the single color
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -48,7 +45,7 @@ impl Texture {
             &rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(4), // 4 bytes per pixel (RGBA8)
+                bytes_per_row: Some(4),
                 rows_per_image: Some(1),
             },
             size,
@@ -75,12 +72,13 @@ impl Texture {
 
     pub fn create_depth_texture(
         device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
+        width: u32,
+        height: u32,
         label: &str,
     ) -> Self {
         let size = wgpu::Extent3d {
-            width: config.width.max(1),
-            height: config.height.max(1),
+            width: width.max(1),
+            height: height.max(1),
             depth_or_array_layers: 1,
         };
         let desc = wgpu::TextureDescriptor {
@@ -237,7 +235,7 @@ impl Texture {
             texture,
             view,
             sampler,
-            size, // NEW!
+            size,
         }
     }
 }
