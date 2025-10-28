@@ -129,7 +129,7 @@ struct Light {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct LightUniform {
+struct LightRaw {
     position: [f32; 3],
     _padding: u32,
     color: [f32; 3],
@@ -138,7 +138,7 @@ struct LightUniform {
 }
 
 impl Light {
-    fn to_raw(&self) -> LightUniform {
+    fn to_raw(&self) -> LightRaw {
         let view = glam::Mat4::look_at_rh(self.pos, glam::Vec3::ZERO, glam::Vec3::Z);
         let projection = glam::Mat4::perspective_rh(
             self.fov * std::f32::consts::PI / 180.,
@@ -147,7 +147,7 @@ impl Light {
             self.depth.end,
         );
         let view_proj = projection * view;
-        LightUniform {
+        LightRaw {
             proj: view_proj.to_cols_array_2d(),
             position: [self.pos.x, self.pos.y, self.pos.z],
             _padding: 0,
@@ -181,6 +181,9 @@ pub struct State {
 
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
+
+    light_instance: Vec<Instance>,
+    light_instance_buffer: wgpu::Buffer,
 
     depth_texture: texture::Texture,
     is_surface_configured: bool,
@@ -409,7 +412,7 @@ impl State {
 
         let lights = vec![
             Light {
-                pos: glam::Vec3::new(2.0, 2.0, 2.0),
+                pos: glam::Vec3::new(1.0, 2.0, 1.0),
                 color: wgpu::Color {
                     r: 0.5,
                     g: 1.0,
@@ -421,7 +424,7 @@ impl State {
                 target_view: None,
             },
             Light {
-                pos: glam::Vec3::new(-2.0, 2.0, -2.0),
+                pos: glam::Vec3::new(-1.0, 2.0, -1.0),
                 color: wgpu::Color {
                     r: 1.0,
                     g: 0.5,
@@ -434,22 +437,35 @@ impl State {
             },
         ];
 
-        // let light_uniform = LightUniform {
-        //     position: [2.0, 2.0, 2.0],
-        //     _padding: 0,
-        //     color: [1.0, 1.0, 1.0],
-        //     _padding2: 0,
-        //     proj: [[0.0; 4]; 4],
-        // };
+        let light_instance: Vec<Instance> = lights
+            .iter()
+            .map(|light| Instance {
+                position: cgmath::Vector3 {
+                    x: light.pos.x,
+                    y: light.pos.y,
+                    z: light.pos.z,
+                },
+                rotation: cgmath::Quaternion::one(),
+                scale: cgmath::Vector3::new(1.0, 1.0, 1.0),
+            })
+            .collect();
 
-        let light_uniforms_size = (MAX_LIGHTS * size_of::<LightUniform>()) as wgpu::BufferAddress;
+        let light_instance_data = light_instance
+            .iter()
+            .map(Instance::to_raw)
+            .collect::<Vec<_>>();
+        let light_instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&light_instance_data),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let light_uniforms_size = (MAX_LIGHTS * size_of::<LightRaw>()) as wgpu::BufferAddress;
 
         let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Light Buffer"),
             size: light_uniforms_size,
-            usage: wgpu::BufferUsages::UNIFORM
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -485,23 +501,6 @@ impl State {
         );
 
         let hdr = hdr::HdrPipeline::new(&device, &config);
-
-        // let shadow_texture =
-        //     texture::Texture::create_depth_texture(&device, 1024, 1024, "shadow_texture");
-
-        // let mut shadow_target_views = [Some(shadow_texture.texture.create_view(
-        //     &wgpu::TextureViewDescriptor {
-        //         label: Some("shadow"),
-        //         format: None,
-        //         dimension: Some(wgpu::TextureViewDimension::D2),
-        //         usage: None,
-        //         aspect: wgpu::TextureAspect::All,
-        //         base_mip_level: 0,
-        //         mip_level_count: None,
-        //         base_array_layer: 0,
-        //         array_layer_count: Some(1),
-        //     },
-        // ))];
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -545,7 +544,7 @@ impl State {
                 &layout,
                 hdr.format(),
                 Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::desc()],
+                &[model::ModelVertex::desc(), InstanceRaw::desc()],
                 wgpu::PrimitiveTopology::TriangleList,
                 shader,
             )
@@ -571,6 +570,9 @@ impl State {
 
             instances,
             instance_buffer,
+
+            light_instance,
+            light_instance_buffer,
 
             depth_texture,
             is_surface_configured: false,
@@ -644,11 +646,22 @@ impl State {
             let new_pos = rotation * old_pos;
 
             light.pos = [new_pos[0], new_pos[1], new_pos[2]].into();
+            self.light_instance[i].position = cgmath::Vector3 {
+                x: light.pos.x,
+                y: light.pos.y,
+                z: light.pos.z,
+            };
 
             self.queue.write_buffer(
                 &self.light_buffer,
-                (i * size_of::<LightUniform>()) as wgpu::BufferAddress,
+                (i * size_of::<LightRaw>()) as wgpu::BufferAddress,
                 bytemuck::cast_slice(&[light.to_raw()]),
+            );
+
+            self.queue.write_buffer(
+                &self.light_instance_buffer,
+                (i * size_of::<InstanceRaw>()) as wgpu::BufferAddress,
+                bytemuck::cast_slice(&[self.light_instance[i].to_raw()]),
             );
         }
     }
@@ -700,15 +713,16 @@ impl State {
                 timestamp_writes: None,
             });
 
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-
+            render_pass.set_vertex_buffer(1, self.light_instance_buffer.slice(..));
             render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(
+            render_pass.draw_light_model_instanced(
                 &self.light_model,
+                0..self.light_instance.len() as u32,
                 &self.camera_bind_group,
                 &self.light_bind_group,
             );
 
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
                 &self.obj_model,
