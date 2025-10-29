@@ -4,19 +4,8 @@ struct Camera {
     view_pos: vec4<f32>,
     view_proj: mat4x4<f32>,
 }
-@group(0) @binding(0)
-var<uniform> camera: Camera;
-
-struct Light {
-    position: vec3<f32>,
-    color: vec3<f32>,
-    proj: mat4x4<f32>,
-}
-struct Lights {
-    lights: array<Light, 10>,
-}
 @group(1) @binding(0)
-var<uniform> lights: Lights;
+var<uniform> camera: Camera;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -37,7 +26,7 @@ struct InstanceInput {
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) color: vec3<f32>,
+    @location(0) tex_coords: vec2<f32>,
 }
 
 @vertex
@@ -56,13 +45,23 @@ fn vs_main(
 
     var out: VertexOutput;
     out.clip_position = camera.view_proj * world_position;
-    out.color = lights.lights[0].color;
+    out.tex_coords = model.tex_coords;
     return out;
 }
 
 // Fragment shader
 
+@group(0) @binding(0)
+var t_diffuse: texture_2d<f32>;
+@group(0)@binding(1)
+var s_diffuse: sampler;
+@group(0)@binding(2)
+var t_normal: texture_2d<f32>;
+@group(0) @binding(3)
+var s_normal: sampler;
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.color, 1.0);
+    let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+    return object_color;
 }

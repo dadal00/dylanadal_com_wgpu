@@ -412,7 +412,7 @@ impl State {
 
         let lights = vec![
             Light {
-                pos: glam::Vec3::new(1.0, 2.0, 1.0),
+                pos: glam::Vec3::new(3.0, 2.0, 3.0),
                 color: wgpu::Color {
                     r: 0.5,
                     g: 1.0,
@@ -424,7 +424,7 @@ impl State {
                 target_view: None,
             },
             Light {
-                pos: glam::Vec3::new(-1.0, 2.0, -1.0),
+                pos: glam::Vec3::new(-3.0, 2.0, -3.0),
                 color: wgpu::Color {
                     r: 1.0,
                     g: 0.5,
@@ -532,7 +532,7 @@ impl State {
         let light_render_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Light Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &light_bind_group_layout],
+                bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
                 push_constant_ranges: &[],
             });
             let shader = wgpu::ShaderModuleDescriptor {
@@ -719,7 +719,6 @@ impl State {
                 &self.light_model,
                 0..self.light_instance.len() as u32,
                 &self.camera_bind_group,
-                &self.light_bind_group,
             );
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
@@ -783,8 +782,7 @@ impl ApplicationHandler<State> for App {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // If we are not on web we can use pollster to
-            // await the
+            // If we are not on web we can use pollster to await
             self.state = Some(pollster::block_on(State::new(window)).unwrap());
         }
 

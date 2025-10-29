@@ -15,17 +15,8 @@ pub struct HdrPipeline {
 
 impl HdrPipeline {
     pub fn new(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
-        let width = if config.width != 0 {
-            config.width
-        } else {
-            config.width + 1
-        };
-
-        let height = if config.height != 0 {
-            config.height
-        } else {
-            config.height + 1
-        };
+        let width = config.width.max(1);
+        let height = config.height.max(1);
 
         // We could use `Rgba32Float`, but that requires some extra
         // features to be enabled.

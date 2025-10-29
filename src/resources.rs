@@ -365,7 +365,7 @@ pub fn create_sphere(
     let white_texture = crate::texture::Texture::from_color(
         device,
         queue,
-        [255, 255, 255, 255],
+        [255, 165, 0, 255],
         Some("Sphere texture"),
     );
     let material = Material::new(

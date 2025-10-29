@@ -13,7 +13,7 @@ struct Light {
     proj: mat4x4<f32>,
 }
 @group(2) @binding(0)
-var<uniform> light: Light;
+var<uniform> lights: array<Light, 10>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -36,8 +36,9 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
     @location(1) tangent_position: vec3<f32>,
-    @location(2) tangent_light_position: vec3<f32>,
-    @location(3) tangent_view_position: vec3<f32>,
+    @location(2) tangent_light_0: vec3<f32>,
+    @location(3) tangent_light_1: vec3<f32>,
+    @location(4) tangent_view_position: vec3<f32>,
 }
 
 @vertex
@@ -74,7 +75,10 @@ fn vs_main(
     out.tex_coords = model.tex_coords;
     out.tangent_position = tangent_matrix * world_position.xyz;
     out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
-    out.tangent_light_position = tangent_matrix * light.position;
+
+    out.tangent_light_0 = tangent_matrix * lights[0].position;
+    out.tangent_light_1 = tangent_matrix * lights[1].position;
+
     return out;
 }
 
@@ -96,16 +100,58 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     let tangent_normal = object_normal.xyz * 2.0 - 1.0;
 
-    let light_vec = in.tangent_light_position - in.tangent_position;
+    // var result_color: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+
+
+    // let light_vec = in.tangent_light_0 - in.tangent_position;
+    // let light_distance = length(light_vec);
+    // let light_dir = normalize(light_vec);
+
+    // let attenuation = 1.0 / (1.0 + 0.09 * light_distance + 0.032 * light_distance * light_distance);
+    // let focused_attenuation = pow(attenuation, 2.0);
+
+    // let diffuse = lights[0].color * max(dot(tangent_normal, light_dir), 0.0) * focused_attenuation;
+    // result_color = result_color + diffuse;
+
+
+    // let light_vec1 = in.tangent_light_1 - in.tangent_position;
+    // let light_distance1 = length(light_vec1);
+    // let light_dir1 = normalize(light_vec1);
+
+    // let attenuation1 = 1.0 / (1.0 + 0.09 * light_distance1 + 0.032 * light_distance1 * light_distance1);
+    // let focused_attenuation1 = pow(attenuation1, 2.0);
+
+    // let diffuse1 = lights[1].color * max(dot(tangent_normal, light_dir1), 0.0) * focused_attenuation1;
+    // result_color = result_color + diffuse1;
+
+    
+
+
+    let light_vec = in.tangent_light_1 - in.tangent_position;
     let light_distance = length(light_vec);
     let light_dir = normalize(light_vec);
 
     let attenuation = 1.0 / (1.0 + 0.09 * light_distance + 0.032 * light_distance * light_distance);
     let focused_attenuation = pow(attenuation, 2.0);
 
-    let diffuse_color = light.color * focused_attenuation;
+    let diffuse_color = lights[1].color * focused_attenuation;
 
-    let result = diffuse_color * object_color.xyz;
+
+    let light_vec1 = in.tangent_light_0 - in.tangent_position;
+    let light_distance1 = length(light_vec1);
+    let light_dir1 = normalize(light_vec1);
+
+    let attenuation1 = 1.0 / (1.0 + 0.09 * light_distance1 + 0.032 * light_distance1 * light_distance1);
+    let focused_attenuation1 = pow(attenuation1, 2.0);
+
+    let diffuse_color1 = lights[1].color * focused_attenuation1;
+
+
+
+    let result = diffuse_color * object_color.xyz + diffuse_color1 * object_color.xyz;
+
+
+    // let final_color = result_color * object_color.xyz;
 
     return vec4<f32>(result, object_color.a);
 }
