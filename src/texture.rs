@@ -74,12 +74,13 @@ impl Texture {
         device: &wgpu::Device,
         width: u32,
         height: u32,
+        depth_or_array_layers: u32,
         label: &str,
     ) -> Self {
         let size = wgpu::Extent3d {
             width: width.max(1),
             height: height.max(1),
-            depth_or_array_layers: 1,
+            depth_or_array_layers,
         };
         let desc = wgpu::TextureDescriptor {
             label: Some(label),
