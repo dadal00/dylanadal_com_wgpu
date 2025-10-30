@@ -1,14 +1,7 @@
 use cgmath::prelude::*;
 use std::sync::Arc;
-use std::{f32::consts::PI, iter};
 use wgpu::util::DeviceExt;
-use winit::{
-    application::ApplicationHandler,
-    event::*,
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
-};
+use winit::{event::*, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -80,7 +73,7 @@ struct InstanceRaw {
     normal: [[f32; 3]; 3],
 }
 
-impl model::Vertex for InstanceRaw {
+impl Vertex for InstanceRaw {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
         wgpu::VertexBufferLayout {
@@ -654,7 +647,7 @@ impl State {
 
             let rotation = cgmath::Quaternion::from_axis_angle(
                 cgmath::Vector3::unit_y(),
-                cgmath::Deg(PI * dt.as_secs_f32()),
+                cgmath::Deg(std::f32::consts::PI * dt.as_secs_f32()),
             );
 
             let new_pos = rotation * old_pos;
@@ -746,7 +739,7 @@ impl State {
         }
         self.hdr.process(&mut encoder, &view);
 
-        self.queue.submit(iter::once(encoder.finish()));
+        self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
         Ok(())
@@ -773,7 +766,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler<State> for App {
+impl winit::application::ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[allow(unused_mut)]
         let mut window_attributes = Window::default_attributes();
@@ -893,7 +886,7 @@ impl ApplicationHandler<State> for App {
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
-                        physical_key: PhysicalKey::Code(code),
+                        physical_key: winit::keyboard::PhysicalKey::Code(code),
                         state: key_state,
                         ..
                     },
@@ -914,7 +907,7 @@ pub fn run() -> anyhow::Result<()> {
         console_log::init_with_level(log::Level::Info).unwrap_throw();
     }
 
-    let event_loop = EventLoop::with_user_event().build()?;
+    let event_loop = winit::event_loop::EventLoop::with_user_event().build()?;
     let mut app = App::new(
         #[cfg(target_arch = "wasm32")]
         &event_loop,
