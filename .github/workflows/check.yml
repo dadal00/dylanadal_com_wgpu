@@ -1,0 +1,17 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check
+        run: |
+          cargo fmt --all -- --check
+          cargo check
