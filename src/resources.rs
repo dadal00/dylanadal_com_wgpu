@@ -218,6 +218,7 @@ pub fn create_plane(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
+    rgba: wgpu::Color,
 ) -> model::Model {
     let vertices = vec![
         ModelVertex {
@@ -263,19 +264,8 @@ pub fn create_plane(
         usage: wgpu::BufferUsages::INDEX,
     });
 
-    let white_texture = crate::texture::Texture::from_color(
-        device,
-        queue,
-        [255, 255, 255, 255],
-        Some("Plane texture"),
-    );
-    let material = Material::new(
-        device,
-        "white_material",
-        white_texture.clone(),
-        white_texture,
-        layout,
-    );
+    let texture = crate::texture::Texture::from_color(device, queue, rgba, Some("Plane texture"));
+    let material = Material::new(device, "white_material", texture.clone(), texture, layout);
 
     let mesh = Mesh {
         name: "plane".to_string(),
@@ -298,6 +288,7 @@ pub fn create_sphere(
     radius: f32,
     latitude_segments: u32,
     longitude_segments: u32,
+    rgba: wgpu::Color,
 ) -> model::Model {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
@@ -362,12 +353,8 @@ pub fn create_sphere(
         usage: wgpu::BufferUsages::INDEX,
     });
 
-    let white_texture = crate::texture::Texture::from_color(
-        device,
-        queue,
-        [255, 165, 0, 255],
-        Some("Sphere texture"),
-    );
+    let white_texture =
+        crate::texture::Texture::from_color(device, queue, rgba, Some("Sphere texture"));
     let material = Material::new(
         device,
         "white_material",
@@ -395,6 +382,7 @@ pub fn create_cube(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     size: f32,
+    rgba: wgpu::Color,
 ) -> model::Model {
     let half = size / 2.0;
 
@@ -607,12 +595,7 @@ pub fn create_cube(
         usage: wgpu::BufferUsages::INDEX,
     });
 
-    let texture = crate::texture::Texture::from_color(
-        device,
-        queue,
-        [255, 255, 255, 255],
-        Some("Cube Texture"),
-    );
+    let texture = crate::texture::Texture::from_color(device, queue, rgba, Some("Cube Texture"));
 
     let material = Material::new(device, "cube_material", texture.clone(), texture, layout);
 

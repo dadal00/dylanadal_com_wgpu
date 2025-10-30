@@ -27,20 +27,26 @@ const MAX_LIGHTS: usize = 10;
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
     view_position: [f32; 4],
-    view_proj: [[f32; 4]; 4],
+    view_projection: [[f32; 4]; 4],
+    number_of_lights: [u32; 4],
 }
 
 impl CameraUniform {
     fn new() -> Self {
         Self {
             view_position: [0.0; 4],
-            view_proj: cgmath::Matrix4::identity().into(),
+            view_projection: cgmath::Matrix4::identity().into(),
+            number_of_lights: [0; 4],
         }
     }
 
     fn update_view_proj(&mut self, camera: &camera::Camera, projection: &camera::Projection) {
         self.view_position = camera.position.to_homogeneous().into();
-        self.view_proj = (projection.calc_matrix() * camera.calc_matrix()).into()
+        self.view_projection = (projection.calc_matrix() * camera.calc_matrix()).into()
+    }
+
+    fn set_lights(&mut self, number_of_lights: u32) {
+        self.number_of_lights[0] = number_of_lights.min(MAX_LIGHTS.try_into().unwrap());
     }
 }
 
@@ -124,8 +130,6 @@ impl model::Vertex for InstanceRaw {
 struct Light {
     pos: glam::Vec3,
     color: wgpu::Color,
-    fov: f32,
-    depth: std::ops::Range<f32>,
 }
 
 #[repr(C)]
@@ -354,32 +358,44 @@ impl State {
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
 
+        let lights = vec![
+            Light {
+                pos: glam::Vec3::new(3.0, 2.0, 3.0),
+                color: wgpu::Color {
+                    r: 1.0,
+                    g: 0.5,
+                    b: 0.5,
+                    a: 1.0,
+                },
+            },
+            Light {
+                pos: glam::Vec3::new(-3.0, 2.0, -3.0),
+                color: wgpu::Color {
+                    r: 1.0,
+                    g: 0.5,
+                    b: 0.5,
+                    a: 1.0,
+                },
+            },
+        ];
+
+        camera_uniform.set_lights(lights.len().try_into().unwrap());
+
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[camera_uniform]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let instances = vec![
-            Instance {
-                position: cgmath::Vector3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                rotation: cgmath::Quaternion::one(),
-                scale: cgmath::Vector3::new(100.0, 1.0, 100.0),
+        let instances = vec![Instance {
+            position: cgmath::Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
             },
-            Instance {
-                position: cgmath::Vector3 {
-                    x: 0.0,
-                    y: 1.0,
-                    z: 0.0,
-                },
-                rotation: cgmath::Quaternion::one(),
-                scale: cgmath::Vector3::new(2.0, 1.0, 2.0),
-            },
-        ];
+            rotation: cgmath::Quaternion::one(),
+            scale: cgmath::Vector3::new(100.0, 1.0, 100.0),
+        }];
 
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -412,35 +428,27 @@ impl State {
             label: Some("camera_bind_group"),
         });
 
-        let light_model =
-            resources::create_sphere(&device, &queue, &texture_bind_group_layout, 1.0, 32, 32);
+        let light_model = resources::create_sphere(
+            &device,
+            &queue,
+            &texture_bind_group_layout,
+            1.0,
+            32,
+            32,
+            lights[1].color,
+        );
 
-        let obj_model = resources::create_cube(&device, &queue, &texture_bind_group_layout, 1.0);
-
-        let lights = vec![
-            Light {
-                pos: glam::Vec3::new(3.0, 2.0, 3.0),
-                color: wgpu::Color {
-                    r: 0.5,
-                    g: 1.0,
-                    b: 0.5,
-                    a: 1.0,
-                },
-                fov: 60.0,
-                depth: 1.0..20.0,
+        let obj_model = resources::create_plane(
+            &device,
+            &queue,
+            &texture_bind_group_layout,
+            wgpu::Color {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
             },
-            Light {
-                pos: glam::Vec3::new(-3.0, 2.0, -3.0),
-                color: wgpu::Color {
-                    r: 1.0,
-                    g: 0.5,
-                    b: 0.5,
-                    a: 1.0,
-                },
-                fov: 45.0,
-                depth: 1.0..20.0,
-            },
-        ];
+        );
 
         let light_instance: Vec<Instance> = lights
             .iter()

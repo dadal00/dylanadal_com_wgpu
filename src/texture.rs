@@ -15,7 +15,7 @@ impl Texture {
     pub fn from_color(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        rgba: [u8; 4],
+        rgba: wgpu::Color,
         label: Option<&str>,
     ) -> Self {
         let size = wgpu::Extent3d {
@@ -35,6 +35,13 @@ impl Texture {
             view_formats: &[],
         });
 
+        let color_bytes: [u8; 4] = [
+            (rgba.r * 255.0) as u8,
+            (rgba.g * 255.0) as u8,
+            (rgba.b * 255.0) as u8,
+            (rgba.a * 255.0) as u8,
+        ];
+
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -42,7 +49,7 @@ impl Texture {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &rgba,
+            &color_bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4),
