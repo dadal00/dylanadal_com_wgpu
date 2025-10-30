@@ -382,15 +382,26 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let instances = vec![Instance {
-            position: cgmath::Vector3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
+        let instances = vec![
+            Instance {
+                position: cgmath::Vector3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                rotation: cgmath::Quaternion::one(),
+                scale: cgmath::Vector3::new(100.0, 1.0, 100.0),
             },
-            rotation: cgmath::Quaternion::one(),
-            scale: cgmath::Vector3::new(10.0, 1.0, 10.0),
-        }];
+            Instance {
+                position: cgmath::Vector3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+                rotation: cgmath::Quaternion::one(),
+                scale: cgmath::Vector3::new(2.0, 1.0, 2.0),
+            },
+        ];
 
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -426,7 +437,7 @@ impl State {
         let light_model =
             resources::create_sphere(&device, &queue, &texture_bind_group_layout, 1.0, 32, 32);
 
-        let obj_model = resources::create_plane(&device, &queue, &texture_bind_group_layout);
+        let obj_model = resources::create_cube(&device, &queue, &texture_bind_group_layout, 1.0);
 
         let shadow_texture =
             texture::Texture::create_depth_texture(&device, 1024, 1024, 2, "shadow_texture");
@@ -509,18 +520,18 @@ impl State {
                 depth: 1.0..20.0,
                 target_view: Some(shadow_target_views[0].take().unwrap()),
             },
-            Light {
-                pos: glam::Vec3::new(-3.0, 2.0, -3.0),
-                color: wgpu::Color {
-                    r: 1.0,
-                    g: 0.5,
-                    b: 0.5,
-                    a: 1.0,
-                },
-                fov: 45.0,
-                depth: 1.0..20.0,
-                target_view: Some(shadow_target_views[1].take().unwrap()),
-            },
+            // Light {
+            //     pos: glam::Vec3::new(-3.0, 2.0, -3.0),
+            //     color: wgpu::Color {
+            //         r: 1.0,
+            //         g: 0.5,
+            //         b: 0.5,
+            //         a: 1.0,
+            //     },
+            //     fov: 45.0,
+            //     depth: 1.0..20.0,
+            //     target_view: Some(shadow_target_views[1].take().unwrap()),
+            // },
         ];
 
         let light_instance: Vec<Instance> = lights

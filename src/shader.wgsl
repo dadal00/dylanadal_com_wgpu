@@ -110,13 +110,19 @@ fn fetch_shadow(light_id: u32, homogeneous_coords: vec4<f32>) -> f32 {
     if (homogeneous_coords.w <= 0.0) {
         return 1.0;
     }
-    // compensate for the Y-flip difference between the NDC and texture coordinates
-    let flip_correction = vec2<f32>(0.5, -0.5);
-    // compute texture coordinates for shadow lookup
-    let proj_correction = 1.0 / homogeneous_coords.w;
-    let light_local = homogeneous_coords.xy * flip_correction * proj_correction + vec2<f32>(0.5, 0.5);
-    // do the lookup, using HW PCF and comparison
-    return textureSampleCompareLevel(t_shadow, sampler_shadow, light_local, i32(light_id), homogeneous_coords.z * proj_correction);
+
+    let ndc = homogeneous_coords.xyz / homogeneous_coords.w;                     // -1..1 range
+    let uv = vec2<f32>(0.5 * ndc.x + 0.5, 0.5 - 0.5 * ndc.y); // Convert to 0..1 and flip Y
+    let depth = 0.5 * ndc.z + 0.5;                 // Convert z to 0..1
+
+    return textureSampleCompareLevel(t_shadow, sampler_shadow, uv, i32(light_id), depth);
+    // // compensate for the Y-flip difference between the NDC and texture coordinates
+    // let flip_correction = vec2<f32>(0.5, -0.5);
+    // // compute texture coordinates for shadow lookup
+    // let proj_correction = 1.0 / homogeneous_coords.w;
+    // let light_local = homogeneous_coords.xy * flip_correction * proj_correction + vec2<f32>(0.5, 0.5);
+    // // do the lookup, using HW PCF and comparison
+    // return textureSampleCompareLevel(t_shadow, sampler_shadow, light_local, i32(light_id), homogeneous_coords.z * proj_correction);
 }
 
 @fragment
@@ -128,16 +134,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 
 
-    let light_vec = in.tangent_light_1 - in.tangent_position;
-    let light_distance = length(light_vec);
-    let light_dir = normalize(light_vec);
+    // let light_vec = in.tangent_light_1 - in.tangent_position;
+    // let light_distance = length(light_vec);
+    // let light_dir = normalize(light_vec);
 
-    let attenuation = 1.0 / (1.0 + 0.09 * light_distance + 0.032 * light_distance * light_distance);
-    let focused_attenuation = pow(attenuation, 2.0);
+    // let attenuation = 1.0 / (1.0 + 0.09 * light_distance + 0.032 * light_distance * light_distance);
+    // let focused_attenuation = pow(attenuation, 2.0);
 
-    let diffuse_color = lights[1].color * focused_attenuation;
+    // let diffuse_color = lights[1].color * focused_attenuation;
 
-    let shadow = fetch_shadow(1, lights[1].proj * in.world_position);
+    // let shadow = fetch_shadow(1, lights[1].proj * in.world_position);
 
 
 
@@ -149,12 +155,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let attenuation1 = 1.0 / (1.0 + 0.09 * light_distance1 + 0.032 * light_distance1 * light_distance1);
     let focused_attenuation1 = pow(attenuation1, 2.0);
 
-    let diffuse_color1 = lights[1].color * focused_attenuation1;
+    let diffuse_color1 = lights[0].color * focused_attenuation1;
     let shadow1 = fetch_shadow(0, lights[0].proj * in.world_position);
 
 
 
-    let result = shadow * diffuse_color * object_color.xyz + shadow1 * diffuse_color1 * object_color.xyz;
+    let result =  shadow1 * diffuse_color1 * object_color.xyz;
 
     return vec4<f32>(result, object_color.a);
 }
