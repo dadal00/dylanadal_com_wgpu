@@ -1,7 +1,6 @@
+use cgmath::prelude::*;
 use std::sync::Arc;
 use std::{f32::consts::PI, iter};
-
-use cgmath::prelude::*;
 use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
@@ -127,13 +126,6 @@ struct Light {
     color: wgpu::Color,
     fov: f32,
     depth: std::ops::Range<f32>,
-    target_view: Option<wgpu::TextureView>,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct ShadowUniform {
-    proj: [[f32; 4]; 4],
 }
 
 #[repr(C)]
@@ -143,21 +135,11 @@ struct LightRaw {
     _padding: u32,
     color: [f32; 3],
     _padding2: u32,
-    proj: [[f32; 4]; 4],
 }
 
 impl Light {
     fn to_raw(&self) -> LightRaw {
-        let view = glam::Mat4::look_at_rh(self.pos, glam::Vec3::ZERO, glam::Vec3::Z);
-        let projection = glam::Mat4::perspective_rh(
-            self.fov * std::f32::consts::PI / 180.,
-            1.0,
-            self.depth.start,
-            self.depth.end,
-        );
-        let view_proj = projection * view;
         LightRaw {
-            proj: view_proj.to_cols_array_2d(),
             position: [self.pos.x, self.pos.y, self.pos.z],
             _padding: 0,
             color: [
@@ -201,10 +183,6 @@ pub struct State {
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
     light_render_pipeline: wgpu::RenderPipeline,
-
-    shadow_buffer: wgpu::Buffer,
-    shadow_bind_group: wgpu::BindGroup,
-    shadow_pipeline: wgpu::RenderPipeline,
 
     mouse_pressed: bool,
     hdr: hdr::HdrPipeline,
@@ -439,74 +417,6 @@ impl State {
 
         let obj_model = resources::create_cube(&device, &queue, &texture_bind_group_layout, 1.0);
 
-        let shadow_texture =
-            texture::Texture::create_depth_texture(&device, 1024, 1024, 2, "shadow_texture");
-
-        let mut shadow_target_views = (0..2)
-            .map(|i| {
-                Some(
-                    shadow_texture
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor {
-                            label: Some("shadow"),
-                            format: None,
-                            dimension: Some(wgpu::TextureViewDimension::D2),
-                            usage: None,
-                            aspect: wgpu::TextureAspect::All,
-                            base_mip_level: 0,
-                            mip_level_count: None,
-                            base_array_layer: i as u32,
-                            array_layer_count: Some(1),
-                        }),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        let shadow_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Shadow Buffer"),
-            size: size_of::<ShadowUniform>() as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let shadow_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            sample_type: wgpu::TextureSampleType::Depth,
-                            view_dimension: wgpu::TextureViewDimension::D2Array,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                        count: None,
-                    },
-                ],
-                label: None,
-            });
-
-        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &shadow_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&shadow_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&shadow_texture.sampler),
-                },
-            ],
-            label: None,
-        });
-
         let lights = vec![
             Light {
                 pos: glam::Vec3::new(3.0, 2.0, 3.0),
@@ -518,20 +428,18 @@ impl State {
                 },
                 fov: 60.0,
                 depth: 1.0..20.0,
-                target_view: Some(shadow_target_views[0].take().unwrap()),
             },
-            // Light {
-            //     pos: glam::Vec3::new(-3.0, 2.0, -3.0),
-            //     color: wgpu::Color {
-            //         r: 1.0,
-            //         g: 0.5,
-            //         b: 0.5,
-            //         a: 1.0,
-            //     },
-            //     fov: 45.0,
-            //     depth: 1.0..20.0,
-            //     target_view: Some(shadow_target_views[1].take().unwrap()),
-            // },
+            Light {
+                pos: glam::Vec3::new(-3.0, 2.0, -3.0),
+                color: wgpu::Color {
+                    r: 1.0,
+                    g: 0.5,
+                    b: 0.5,
+                    a: 1.0,
+                },
+                fov: 45.0,
+                depth: 1.0..20.0,
+            },
         ];
 
         let light_instance: Vec<Instance> = lights
@@ -562,53 +470,31 @@ impl State {
         let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Light Buffer"),
             size: light_uniforms_size,
-            usage: wgpu::BufferUsages::UNIFORM
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let light_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(light_uniforms_size),
-                        },
-                        count: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(light_uniforms_size),
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(
-                                size_of::<ShadowUniform>() as wgpu::BufferAddress
-                            ),
-                        },
-                        count: None,
-                    },
-                ],
+                    count: None,
+                }],
                 label: None,
             });
 
         let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &light_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: light_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: shadow_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_buffer.as_entire_binding(),
+            }],
             label: None,
         });
 
@@ -629,7 +515,6 @@ impl State {
                     &texture_bind_group_layout,
                     &camera_bind_group_layout,
                     &light_bind_group_layout,
-                    &shadow_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -671,31 +556,6 @@ impl State {
             )
         };
 
-        let shadow_pipeline = {
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Shadow Pipeline Layout"),
-                bind_group_layouts: &[
-                    &texture_bind_group_layout,
-                    &camera_bind_group_layout,
-                    &light_bind_group_layout,
-                ],
-                push_constant_ranges: &[],
-            });
-            let shader = wgpu::ShaderModuleDescriptor {
-                label: Some("Main Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
-            };
-            create_render_pipeline(
-                &device,
-                &layout,
-                None,
-                Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::desc(), InstanceRaw::desc()],
-                wgpu::PrimitiveTopology::TriangleList,
-                shader,
-            )
-        };
-
         Ok(Self {
             window,
             surface,
@@ -727,10 +587,6 @@ impl State {
             light_buffer,
             light_bind_group,
             light_render_pipeline,
-
-            shadow_buffer,
-            shadow_bind_group,
-            shadow_pipeline,
 
             mouse_pressed: false,
             hdr,
@@ -835,41 +691,6 @@ impl State {
             });
 
         {
-            for (i, light) in self.lights.iter().enumerate() {
-                encoder.copy_buffer_to_buffer(
-                    &self.light_buffer,
-                    (i * size_of::<LightRaw>()) as wgpu::BufferAddress + 32,
-                    &self.shadow_buffer,
-                    0,
-                    64,
-                );
-
-                let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &light.target_view.as_ref().expect("shadow testing"),
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-
-                shadow_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-                shadow_pass.set_pipeline(&self.shadow_pipeline);
-                shadow_pass.draw_model_instanced(
-                    &self.obj_model,
-                    0..self.instances.len() as u32,
-                    &self.camera_bind_group,
-                    &self.light_bind_group,
-                    None,
-                );
-            }
-
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -913,7 +734,6 @@ impl State {
                 0..self.instances.len() as u32,
                 &self.camera_bind_group,
                 &self.light_bind_group,
-                Some(&self.shadow_bind_group),
             );
         }
         self.hdr.process(&mut encoder, &view);
