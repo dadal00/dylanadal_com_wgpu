@@ -1,9 +1,9 @@
-use model::{Material, Mesh, Model, ModelVertex};
 use std::io::{BufReader, Cursor};
-
 use wgpu::util::DeviceExt;
 
 use crate::{model, texture};
+
+use model::{Material, Mesh, Model, ModelVertex};
 
 #[cfg(target_arch = "wasm32")]
 fn format_url(file_name: &str) -> reqwest::Url {
@@ -365,7 +365,7 @@ pub fn create_sphere(
     let white_texture = crate::texture::Texture::from_color(
         device,
         queue,
-        [255, 255, 255, 255],
+        [255, 165, 0, 255],
         Some("Sphere texture"),
     );
     let material = Material::new(
@@ -385,6 +385,246 @@ pub fn create_sphere(
     };
 
     Model {
+        meshes: vec![mesh],
+        materials: vec![material],
+    }
+}
+
+pub fn create_cube(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    size: f32,
+) -> model::Model {
+    let half = size / 2.0;
+
+    // Define 8 corners of the cube
+    let positions = [
+        // Front face
+        [-half, -half, half],
+        [half, -half, half],
+        [half, half, half],
+        [-half, half, half],
+        // Back face
+        [-half, -half, -half],
+        [half, -half, -half],
+        [half, half, -half],
+        [-half, half, -half],
+    ];
+
+    let vertices = [
+        // Front
+        ModelVertex {
+            position: positions[0],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[1],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[2],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[3],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        // Back
+        ModelVertex {
+            position: positions[5],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [-1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[4],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [-1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[7],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [-1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[6],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [-1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        // Left
+        ModelVertex {
+            position: positions[4],
+            normal: [-1.0, 0.0, 0.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [0.0, 0.0, -1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[0],
+            normal: [-1.0, 0.0, 0.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [0.0, 0.0, -1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[3],
+            normal: [-1.0, 0.0, 0.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [0.0, 0.0, -1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[7],
+            normal: [-1.0, 0.0, 0.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [0.0, 0.0, -1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        // Right
+        ModelVertex {
+            position: positions[1],
+            normal: [1.0, 0.0, 0.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [0.0, 0.0, 1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[5],
+            normal: [1.0, 0.0, 0.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [0.0, 0.0, 1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[6],
+            normal: [1.0, 0.0, 0.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [0.0, 0.0, 1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[2],
+            normal: [1.0, 0.0, 0.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [0.0, 0.0, 1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        // Top
+        ModelVertex {
+            position: positions[3],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, -1.0],
+        },
+        ModelVertex {
+            position: positions[2],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, -1.0],
+        },
+        ModelVertex {
+            position: positions[6],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, -1.0],
+        },
+        ModelVertex {
+            position: positions[7],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, -1.0],
+        },
+        // Bottom
+        ModelVertex {
+            position: positions[4],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        ModelVertex {
+            position: positions[5],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        ModelVertex {
+            position: positions[1],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        ModelVertex {
+            position: positions[0],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+    ];
+
+    let indices: Vec<u32> = (0..6)
+        .flat_map(|i| {
+            let base = i * 4;
+            [base, base + 1, base + 2, base, base + 2, base + 3]
+        })
+        .collect();
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Cube Vertex Buffer"),
+        contents: bytemuck::cast_slice(&vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Cube Index Buffer"),
+        contents: bytemuck::cast_slice(&indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+
+    let texture = crate::texture::Texture::from_color(
+        device,
+        queue,
+        [255, 255, 255, 255],
+        Some("Cube Texture"),
+    );
+
+    let material = Material::new(device, "cube_material", texture.clone(), texture, layout);
+
+    let mesh = Mesh {
+        name: "cube".to_string(),
+        vertex_buffer,
+        index_buffer,
+        num_elements: indices.len() as u32,
+        material: 0,
+    };
+
+    model::Model {
         meshes: vec![mesh],
         materials: vec![material],
     }
