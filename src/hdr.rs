@@ -2,7 +2,7 @@
 use wgpu::*;
 
 // Internal Modules
-use crate::{create_render_pipeline, texture::Texture};
+use crate::{texture::Texture, utils::create_render_pipeline};
 
 pub struct HdrPipeline {
     pipeline: RenderPipeline,

@@ -33,6 +33,7 @@ mod light;
 mod model;
 mod resources;
 mod texture;
+mod utils;
 
 // Internal Modules
 use camera::{Camera, CameraController, CameraUniform, Projection};
@@ -41,13 +42,17 @@ use light::{Light, LightRaw, MAX_LIGHTS};
 use model::{DrawLight, DrawModel, Instance, InstanceRaw, Model, ModelVertex, Vertex};
 use resources::{create_plane, create_sphere};
 use texture::Texture;
+use utils::{
+    configure_surface, create_adapter, create_render_pipeline, create_wgpu_instance,
+    format_surface, get_device_and_queue,
+};
 
 pub struct State {
     window: Arc<Window>,
     surface: Surface<'static>,
     device: Device,
     queue: Queue,
-    config: SurfaceConfiguration,
+    surface_config: SurfaceConfiguration,
 
     render_pipeline: RenderPipeline,
     light_model: Model,
@@ -78,125 +83,21 @@ pub struct State {
     hdr: HdrPipeline,
 }
 
-fn create_render_pipeline(
-    device: &Device,
-    layout: &PipelineLayout,
-    color_format: Option<TextureFormat>,
-    depth_format: Option<TextureFormat>,
-    vertex_layouts: &[VertexBufferLayout],
-    topology: PrimitiveTopology, // NEW!
-    shader: ShaderModuleDescriptor,
-) -> RenderPipeline {
-    let shader = device.create_shader_module(shader);
-
-    let fragment = if color_format.is_some() {
-        Some(FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
-            targets: &[Some(ColorTargetState {
-                format: color_format.expect("is some check failed"),
-                blend: None,
-                write_mask: ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        })
-    } else {
-        None
-    };
-
-    device.create_render_pipeline(&RenderPipelineDescriptor {
-        label: Some(&format!("{:?}", shader)),
-        layout: Some(layout),
-        vertex: VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
-            buffers: vertex_layouts,
-            compilation_options: Default::default(),
-        },
-        fragment,
-        primitive: PrimitiveState {
-            topology,
-            strip_index_format: None,
-            front_face: FrontFace::Ccw,
-            cull_mode: None,
-            polygon_mode: PolygonMode::Fill,
-            unclipped_depth: false,
-            conservative: false,
-        },
-        depth_stencil: depth_format.map(|format| DepthStencilState {
-            format,
-            depth_write_enabled: true,
-            depth_compare: CompareFunction::LessEqual,
-            stencil: StencilState::default(),
-            bias: DepthBiasState::default(),
-        }),
-        multisample: MultisampleState {
-            count: 1,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        },
-        multiview: None,
-        cache: None,
-    })
-}
-
 impl State {
     async fn new(window: Arc<Window>) -> Result<State> {
         let size = window.inner_size();
 
-        // We prefix with wgpu due to Instance conflict
-        let instance = wgpu::Instance::new(&InstanceDescriptor {
-            #[cfg(not(target_arch = "wasm32"))]
-            backends: Backends::PRIMARY,
-            #[cfg(target_arch = "wasm32")]
-            backends: Backends::GL,
-            ..Default::default()
-        });
+        let instance = create_wgpu_instance();
 
         let surface = instance.create_surface(window.clone()).unwrap();
 
-        let adapter = instance
-            .request_adapter(&RequestAdapterOptions {
-                power_preference: PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await
-            .unwrap();
-        let (device, queue) = adapter
-            .request_device(&DeviceDescriptor {
-                label: None,
-                required_features: Features::empty(),
-                experimental_features: ExperimentalFeatures::disabled(),
-                required_limits: if cfg!(target_arch = "wasm32") {
-                    Limits::downlevel_webgl2_defaults()
-                } else {
-                    Limits::default()
-                },
-                memory_hints: Default::default(),
-                trace: Trace::Off, // Trace path
-            })
-            .await
-            .unwrap();
+        let adapter = create_adapter(&instance, &surface).await;
+        let (device, queue) = get_device_and_queue(&adapter).await;
 
-        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_capabilities = surface.get_capabilities(&adapter);
 
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
-        let config = SurfaceConfiguration {
-            usage: TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width,
-            height: size.height,
-            present_mode: surface_caps.present_modes[0],
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
+        let surface_format = format_surface(&surface_capabilities);
+        let surface_config = configure_surface(&surface_format, &surface_capabilities, &size);
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -238,7 +139,13 @@ impl State {
             });
 
         let camera = Camera::new((0.0, 5.0, 10.0), Deg(-90.0), Deg(-20.0));
-        let projection = Projection::new(config.width, config.height, Deg(45.0), 0.1, 100.0);
+        let projection = Projection::new(
+            surface_config.width,
+            surface_config.height,
+            Deg(45.0),
+            0.1,
+            100.0,
+        );
         let camera_controller = CameraController::new(4.0, 0.4);
 
         let mut camera_uniform = CameraUniform::new();
@@ -391,10 +298,15 @@ impl State {
             label: None,
         });
 
-        let depth_texture =
-            Texture::create_depth_texture(&device, config.width, config.height, 1, "depth_texture");
+        let depth_texture = Texture::create_depth_texture(
+            &device,
+            surface_config.width,
+            surface_config.height,
+            1,
+            "depth_texture",
+        );
 
-        let hdr = HdrPipeline::new(&device, &config);
+        let hdr = HdrPipeline::new(&device, &surface_config);
 
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
@@ -448,7 +360,7 @@ impl State {
             surface,
             device,
             queue,
-            config,
+            surface_config,
 
             render_pipeline,
             light_model,
@@ -485,13 +397,13 @@ impl State {
             self.projection.resize(width, height);
             self.hdr.resize(&self.device, width, height);
             self.is_surface_configured = true;
-            self.config.width = width;
-            self.config.height = height;
-            self.surface.configure(&self.device, &self.config);
+            self.surface_config.width = width;
+            self.surface_config.height = height;
+            self.surface.configure(&self.device, &self.surface_config);
             self.depth_texture = Texture::create_depth_texture(
                 &self.device,
-                self.config.width,
-                self.config.height,
+                self.surface_config.width,
+                self.surface_config.height,
                 1,
                 "depth_texture",
             );
