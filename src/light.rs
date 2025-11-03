@@ -1,9 +1,27 @@
 // External
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
-use wgpu::Color;
+use wgpu::*;
 
 pub const MAX_LIGHTS: usize = 10;
+pub const MAX_LIGHT_UNIFORMS_SIZE: BufferAddress =
+    (MAX_LIGHTS * size_of::<LightRaw>()) as BufferAddress;
+
+pub fn create_lights_bind_group_layout(device: &Device) -> BindGroupLayout {
+    device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        entries: &[BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: BufferSize::new(MAX_LIGHT_UNIFORMS_SIZE),
+            },
+            count: None,
+        }],
+        label: None,
+    })
+}
 
 pub struct Light {
     pub pos: Vec3,

@@ -6,23 +6,23 @@ use anyhow::Result;
 use bytemuck::cast_slice;
 use cgmath::{Deg, Quaternion, Vector3, prelude::*};
 use glam::Vec3;
-use wgpu::{
-    util::{BufferInitDescriptor, DeviceExt},
-    *,
-};
+use wgpu::*;
 use winit::{event::*, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 // Internal Modules
 use crate::{
-    camera::{Camera, CameraController, CameraUniform, Projection},
+    camera::{
+        Camera, CameraController, CameraUniform, Projection, create_camera_bind_group_layout,
+    },
     hdr::HdrPipeline,
-    light::{Light, LightRaw, MAX_LIGHTS},
+    light::{Light, LightRaw, MAX_LIGHT_UNIFORMS_SIZE, create_lights_bind_group_layout},
     model::{DrawLight, DrawModel, Instance, InstanceRaw, Model, ModelVertex, Vertex},
     resources::{create_plane, create_sphere},
     texture::{Texture, create_texture_bind_group_layout},
     utils::{
-        configure_surface, create_adapter, create_render_pipeline, create_wgpu_instance,
-        format_surface, get_device_and_queue,
+        configure_surface, create_adapter, create_bind_group, create_buffer,
+        create_render_pipeline, create_wgpu_instance, format_surface, get_device_and_queue,
+        init_buffer,
     },
 };
 
@@ -47,7 +47,7 @@ pub struct State {
     instances: Vec<Instance>,
     instance_buffer: Buffer,
 
-    light_instance: Vec<Instance>,
+    light_instances: Vec<Instance>,
     light_instance_buffer: Buffer,
 
     depth_texture: Texture,
@@ -116,11 +116,12 @@ impl State {
 
         camera_uniform.set_lights(lights.len().try_into().unwrap());
 
-        let camera_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: cast_slice(&[camera_uniform]),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        });
+        let camera_buffer = init_buffer(
+            &device,
+            "Camera Buffer",
+            &[camera_uniform],
+            BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        );
 
         let instances = vec![Instance {
             position: Vector3 {
@@ -132,36 +133,22 @@ impl State {
             scale: Vector3::new(100.0, 1.0, 100.0),
         }];
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: cast_slice(&instance_data),
-            usage: BufferUsages::VERTEX,
-        });
+        let instance_data = Instance::to_raw_vec(&instances);
+        let instance_buffer = init_buffer(
+            &device,
+            "Instance Buffer",
+            &instance_data,
+            BufferUsages::VERTEX,
+        );
 
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                entries: &[BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("camera_bind_group_layout"),
-            });
+        let camera_bind_group_layout = create_camera_bind_group_layout(&device);
 
-        let camera_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-            label: Some("camera_bind_group"),
-        });
+        let camera_bind_group = create_bind_group(
+            &device,
+            &camera_bind_group_layout,
+            &[camera_buffer.as_entire_binding()],
+            "Camera Bind Group",
+        );
 
         let light_model = create_sphere(
             &device,
@@ -185,7 +172,7 @@ impl State {
             },
         );
 
-        let light_instance: Vec<Instance> = lights
+        let light_instances: Vec<Instance> = lights
             .iter()
             .map(|light| Instance {
                 position: Vector3 {
@@ -198,47 +185,30 @@ impl State {
             })
             .collect();
 
-        let light_instance_data = light_instance
-            .iter()
-            .map(Instance::to_raw)
-            .collect::<Vec<_>>();
-        let light_instance_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: cast_slice(&light_instance_data),
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-        });
+        let light_instance_data = Instance::to_raw_vec(&light_instances);
 
-        let light_uniforms_size = (MAX_LIGHTS * size_of::<LightRaw>()) as BufferAddress;
+        let light_instance_buffer = init_buffer(
+            &device,
+            "Light Instance Buffer",
+            &light_instance_data,
+            BufferUsages::VERTEX | BufferUsages::COPY_DST,
+        );
 
-        let light_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("Light Buffer"),
-            size: light_uniforms_size,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let light_buffer = create_buffer(
+            &device,
+            "Light Buffer",
+            MAX_LIGHT_UNIFORMS_SIZE,
+            BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        );
 
-        let light_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: BufferSize::new(light_uniforms_size),
-                },
-                count: None,
-            }],
-            label: None,
-        });
+        let light_bind_group_layout = create_lights_bind_group_layout(&device);
 
-        let light_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            layout: &light_bind_group_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
-            label: None,
-        });
+        let light_bind_group = create_bind_group(
+            &device,
+            &light_bind_group_layout,
+            &[light_buffer.as_entire_binding()],
+            "Light Buffer",
+        );
 
         let depth_texture = Texture::create_depth_texture(
             &device,
@@ -318,7 +288,7 @@ impl State {
             instances,
             instance_buffer,
 
-            light_instance,
+            light_instances,
             light_instance_buffer,
 
             depth_texture,
@@ -392,7 +362,7 @@ impl State {
             let new_pos = rotation * old_pos;
 
             light.pos = [new_pos[0], new_pos[1], new_pos[2]].into();
-            self.light_instance[i].position = Vector3 {
+            self.light_instances[i].position = Vector3 {
                 x: light.pos.x,
                 y: light.pos.y,
                 z: light.pos.z,
@@ -407,7 +377,7 @@ impl State {
             self.queue.write_buffer(
                 &self.light_instance_buffer,
                 (i * size_of::<InstanceRaw>()) as BufferAddress,
-                cast_slice(&[self.light_instance[i].to_raw()]),
+                cast_slice(&[self.light_instances[i].to_raw()]),
             );
         }
     }
@@ -463,7 +433,7 @@ impl State {
             render_pass.set_pipeline(&self.light_render_pipeline);
             render_pass.draw_light_model_instanced(
                 &self.light_model,
-                0..self.light_instance.len() as u32,
+                0..self.light_instances.len() as u32,
                 &self.camera_bind_group,
             );
 

@@ -1,5 +1,58 @@
-use wgpu::*;
+use bytemuck::{Pod, cast_slice};
+use wgpu::{
+    util::{BufferInitDescriptor, DeviceExt},
+    *,
+};
 use winit::dpi::PhysicalSize;
+
+pub fn create_bind_group(
+    device: &Device,
+    bind_group_layout: &BindGroupLayout,
+    resources: &[BindingResource],
+    label: &str,
+) -> BindGroup {
+    let entries: Vec<BindGroupEntry> = resources
+        .iter()
+        .enumerate()
+        .map(|(i, resource)| BindGroupEntry {
+            binding: i as u32,
+            resource: resource.clone(),
+        })
+        .collect();
+
+    device.create_bind_group(&BindGroupDescriptor {
+        layout: bind_group_layout,
+        entries: &entries,
+        label: Some(label),
+    })
+}
+
+pub fn create_buffer(
+    device: &Device,
+    label: &str,
+    size: BufferAddress,
+    usage: BufferUsages,
+) -> Buffer {
+    device.create_buffer(&BufferDescriptor {
+        label: Some(label),
+        size: size,
+        usage: usage,
+        mapped_at_creation: false,
+    })
+}
+
+pub fn init_buffer<T: Pod>(
+    device: &Device,
+    label: &str,
+    buffer_contents: &[T],
+    usage: BufferUsages,
+) -> Buffer {
+    device.create_buffer_init(&BufferInitDescriptor {
+        label: Some(label),
+        contents: cast_slice(buffer_contents),
+        usage: usage,
+    })
+}
 
 pub fn configure_surface(
     surface_format: &TextureFormat,

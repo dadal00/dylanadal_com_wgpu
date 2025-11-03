@@ -35,12 +35,12 @@ jobs:
       - name: Commit and push changes for website repository
         run: |
           cd dylanadal_com
-          git config user.name "Dylan Adal"
+          git config user.name "dadal00"
           git config user.email "dylanadal.00@gmail.com"
           git add src/lib/pkg
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Deploy updated WASM package"
+            git commit -m "deploy updated WASM package"
             git push
           fi

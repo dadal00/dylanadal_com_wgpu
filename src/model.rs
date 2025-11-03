@@ -29,6 +29,10 @@ impl Instance {
             normal: Matrix3::from(self.rotation).into(),
         }
     }
+
+    pub fn to_raw_vec(instances: &Vec<Instance>) -> Vec<InstanceRaw> {
+        instances.iter().map(Self::to_raw).collect()
+    }
 }
 
 #[repr(C)]
