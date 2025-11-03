@@ -233,7 +233,7 @@ impl State {
         let render_pipeline = {
             let shader = ShaderModuleDescriptor {
                 label: Some("Normal Shader"),
-                source: ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+                source: ShaderSource::Wgsl(include_str!("../shaders/shader.wgsl").into()),
             };
             create_render_pipeline(
                 &device,
@@ -254,7 +254,7 @@ impl State {
             });
             let shader = ShaderModuleDescriptor {
                 label: Some("Light Shader"),
-                source: ShaderSource::Wgsl(include_str!("light.wgsl").into()),
+                source: ShaderSource::Wgsl(include_str!("../shaders/light.wgsl").into()),
             };
             create_render_pipeline(
                 &device,

@@ -72,7 +72,7 @@ impl HdrPipeline {
             ],
         });
 
-        let shader = include_wgsl!("hdr.wgsl");
+        let shader = include_wgsl!("../shaders/hdr.wgsl");
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&layout],
