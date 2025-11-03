@@ -1,0 +1,46 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  build-and-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare WASM tools
+        run: cargo install wasm-pack
+
+      - name: Build WASM package
+        run: wasm-pack build --target web
+
+      - name: Checkout website repository
+        uses: actions/checkout@v4
+        with:
+          repository: dadal00/dylanadal_com
+          token: ${{ secrets.WEBSITE_DEPLOY }}
+          path: dylanadal_com
+
+      - name: Copy WASM package into website respository
+        run: |
+          rm -rf dylanadal_com/src/lib/pkg
+          mkdir -p dylanadal_com/src/lib/pkg
+          cp -r pkg dylanadal_com/src/lib/pkg
+
+      - name: Commit and push changes for website repository
+        run: |
+          cd dylanadal_com
+          git config user.name "Dylan Adal"
+          git config user.email "dylanadal.00@gmail.com"
+          git add src/lib/pkg
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Deploy updated WASM package"
+            git push
+          fi
