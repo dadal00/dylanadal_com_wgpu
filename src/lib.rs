@@ -1,7 +1,7 @@
-/* Standard Library */
+// Standard Library
 use std::{f32::consts::PI, iter::once, sync::Arc, time::Duration};
 
-/* External */
+// External
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable, cast_slice};
 use camera::{Camera, CameraController, Projection};
@@ -20,14 +20,14 @@ use winit::{
     window::{Window, WindowId},
 };
 
-/* Web Assembly */
+// Web Assembly
 #[cfg(target_arch = "wasm32")]
 use {
     wasm_bindgen::{JsCast, prelude::*},
     winit::{event_loop::EventLoopProxy, platform::web::WindowAttributesExtWebSys},
 };
 
-/* Internal Modules */
+// Internal Modules
 mod camera;
 mod hdr;
 mod model;
@@ -274,6 +274,7 @@ impl State {
     async fn new(window: Arc<Window>) -> Result<State> {
         let size = window.inner_size();
 
+        // We prefix with wgpu due to Instance conflict
         let instance = wgpu::Instance::new(&InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: Backends::PRIMARY,
