@@ -2,6 +2,8 @@
 name = "dylanadal_com_wgpu"
 version = "0.1.0"
 edition = "2024"
+description = "Personal website animation."
+repository = "https://github.com/dadal00/dylanadal_com_wgpu"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
