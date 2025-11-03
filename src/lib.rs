@@ -3,9 +3,8 @@ use std::{f32::consts::PI, iter::once, sync::Arc, time::Duration};
 
 // External
 use anyhow::Result;
-use bytemuck::{Pod, Zeroable, cast_slice};
-use camera::{Camera, CameraController, Projection};
-use cgmath::{Deg, Matrix3, Matrix4, Quaternion, Vector3, prelude::*};
+use bytemuck::cast_slice;
+use cgmath::{Deg, Quaternion, Vector3, prelude::*};
 use glam::Vec3;
 use instant::Instant;
 use wgpu::{
@@ -27,150 +26,21 @@ use {
     winit::{event_loop::EventLoopProxy, platform::web::WindowAttributesExtWebSys},
 };
 
-// Internal Modules
+// Module Declaration
 mod camera;
 mod hdr;
+mod light;
 mod model;
 mod resources;
 mod texture;
 
+// Internal Modules
+use camera::{Camera, CameraController, CameraUniform, Projection};
 use hdr::HdrPipeline;
-use model::{DrawLight, DrawModel, Model, ModelVertex, Vertex};
+use light::{Light, LightRaw, MAX_LIGHTS};
+use model::{DrawLight, DrawModel, Instance, InstanceRaw, Model, ModelVertex, Vertex};
 use resources::{create_plane, create_sphere};
 use texture::Texture;
-
-const MAX_LIGHTS: usize = 10;
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct CameraUniform {
-    view_position: [f32; 4],
-    view_projection: [[f32; 4]; 4],
-    number_of_lights: [u32; 4],
-}
-
-impl CameraUniform {
-    fn new() -> Self {
-        Self {
-            view_position: [0.0; 4],
-            view_projection: Matrix4::identity().into(),
-            number_of_lights: [0; 4],
-        }
-    }
-
-    fn update_view_proj(&mut self, camera: &Camera, projection: &Projection) {
-        self.view_position = camera.position.to_homogeneous().into();
-        self.view_projection = (projection.calc_matrix() * camera.calc_matrix()).into()
-    }
-
-    fn set_lights(&mut self, number_of_lights: u32) {
-        self.number_of_lights[0] = number_of_lights.min(MAX_LIGHTS.try_into().unwrap());
-    }
-}
-
-struct Instance {
-    position: Vector3<f32>,
-    rotation: Quaternion<f32>,
-    scale: Vector3<f32>,
-}
-
-impl Instance {
-    fn to_raw(&self) -> InstanceRaw {
-        let scale_matrix = Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
-
-        let rotation_matrix = Matrix4::from(self.rotation);
-        let translation_matrix = Matrix4::from_translation(self.position);
-
-        let model_matrix = translation_matrix * rotation_matrix * scale_matrix;
-
-        InstanceRaw {
-            model: model_matrix.into(),
-            normal: Matrix3::from(self.rotation).into(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Pod, Zeroable)]
-struct InstanceRaw {
-    model: [[f32; 4]; 4],
-    normal: [[f32; 3]; 3],
-}
-
-impl Vertex for InstanceRaw {
-    fn desc() -> VertexBufferLayout<'static> {
-        VertexBufferLayout {
-            array_stride: size_of::<InstanceRaw>() as BufferAddress,
-            step_mode: VertexStepMode::Instance,
-            attributes: &[
-                VertexAttribute {
-                    offset: 0,
-                    shader_location: 5,
-                    format: VertexFormat::Float32x4,
-                },
-                VertexAttribute {
-                    offset: size_of::<[f32; 4]>() as BufferAddress,
-                    shader_location: 6,
-                    format: VertexFormat::Float32x4,
-                },
-                VertexAttribute {
-                    offset: size_of::<[f32; 8]>() as BufferAddress,
-                    shader_location: 7,
-                    format: VertexFormat::Float32x4,
-                },
-                VertexAttribute {
-                    offset: size_of::<[f32; 12]>() as BufferAddress,
-                    shader_location: 8,
-                    format: VertexFormat::Float32x4,
-                },
-                VertexAttribute {
-                    offset: size_of::<[f32; 16]>() as BufferAddress,
-                    shader_location: 9,
-                    format: VertexFormat::Float32x3,
-                },
-                VertexAttribute {
-                    offset: size_of::<[f32; 19]>() as BufferAddress,
-                    shader_location: 10,
-                    format: VertexFormat::Float32x3,
-                },
-                VertexAttribute {
-                    offset: size_of::<[f32; 22]>() as BufferAddress,
-                    shader_location: 11,
-                    format: VertexFormat::Float32x3,
-                },
-            ],
-        }
-    }
-}
-
-struct Light {
-    pos: Vec3,
-    color: Color,
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Pod, Zeroable)]
-struct LightRaw {
-    position: [f32; 3],
-    _padding: u32,
-    color: [f32; 3],
-    _padding2: u32,
-}
-
-impl Light {
-    fn to_raw(&self) -> LightRaw {
-        LightRaw {
-            position: [self.pos.x, self.pos.y, self.pos.z],
-            _padding: 0,
-            color: [
-                self.color.r as f32,
-                self.color.g as f32,
-                self.color.b as f32,
-            ],
-            _padding2: 0,
-        }
-    }
-}
 
 pub struct State {
     window: Arc<Window>,

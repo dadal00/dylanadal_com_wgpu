@@ -3,10 +3,86 @@ use std::ops::Range;
 
 // External
 use bytemuck::{Pod, Zeroable};
+use cgmath::{Matrix3, Matrix4, Quaternion, Vector3};
 use wgpu::*;
 
-// Internal Modules
+// Internal Module
 use crate::texture::Texture;
+
+pub struct Instance {
+    pub position: Vector3<f32>,
+    pub rotation: Quaternion<f32>,
+    pub scale: Vector3<f32>,
+}
+
+impl Instance {
+    pub fn to_raw(&self) -> InstanceRaw {
+        let scale_matrix = Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
+
+        let rotation_matrix = Matrix4::from(self.rotation);
+        let translation_matrix = Matrix4::from_translation(self.position);
+
+        let model_matrix = translation_matrix * rotation_matrix * scale_matrix;
+
+        InstanceRaw {
+            model: model_matrix.into(),
+            normal: Matrix3::from(self.rotation).into(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+pub struct InstanceRaw {
+    model: [[f32; 4]; 4],
+    normal: [[f32; 3]; 3],
+}
+
+impl Vertex for InstanceRaw {
+    fn desc() -> VertexBufferLayout<'static> {
+        VertexBufferLayout {
+            array_stride: size_of::<InstanceRaw>() as BufferAddress,
+            step_mode: VertexStepMode::Instance,
+            attributes: &[
+                VertexAttribute {
+                    offset: 0,
+                    shader_location: 5,
+                    format: VertexFormat::Float32x4,
+                },
+                VertexAttribute {
+                    offset: size_of::<[f32; 4]>() as BufferAddress,
+                    shader_location: 6,
+                    format: VertexFormat::Float32x4,
+                },
+                VertexAttribute {
+                    offset: size_of::<[f32; 8]>() as BufferAddress,
+                    shader_location: 7,
+                    format: VertexFormat::Float32x4,
+                },
+                VertexAttribute {
+                    offset: size_of::<[f32; 12]>() as BufferAddress,
+                    shader_location: 8,
+                    format: VertexFormat::Float32x4,
+                },
+                VertexAttribute {
+                    offset: size_of::<[f32; 16]>() as BufferAddress,
+                    shader_location: 9,
+                    format: VertexFormat::Float32x3,
+                },
+                VertexAttribute {
+                    offset: size_of::<[f32; 19]>() as BufferAddress,
+                    shader_location: 10,
+                    format: VertexFormat::Float32x3,
+                },
+                VertexAttribute {
+                    offset: size_of::<[f32; 22]>() as BufferAddress,
+                    shader_location: 11,
+                    format: VertexFormat::Float32x3,
+                },
+            ],
+        }
+    }
+}
 
 pub trait Vertex {
     fn desc() -> VertexBufferLayout<'static>;

@@ -21,8 +21,10 @@ use wgpu::{
 use reqwest::{Url, get};
 
 // Internal Modules
-use crate::{model, texture::Texture};
-use model::{Material, Mesh, Model, ModelVertex};
+use crate::{
+    model::{Material, Mesh, Model, ModelVertex},
+    texture::Texture,
+};
 
 #[cfg(target_arch = "wasm32")]
 fn format_url(file_name: &str) -> Url {

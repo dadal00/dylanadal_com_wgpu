@@ -2,10 +2,13 @@
 use std::{f32::consts::FRAC_PI_2, time::Duration};
 
 // External
+use bytemuck::{Pod, Zeroable};
 use cgmath::*;
 use winit::{dpi::PhysicalPosition, event::*, keyboard::KeyCode};
 
-#[rustfmt::skip]
+// Internal Module
+use crate::light::MAX_LIGHTS;
+
 pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::from_cols(
     Vector4::new(1.0, 0.0, 0.0, 0.0),
     Vector4::new(0.0, 1.0, 0.0, 0.0),
@@ -14,6 +17,33 @@ pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::from_cols(
 );
 
 const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
+
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+pub struct CameraUniform {
+    view_position: [f32; 4],
+    view_projection: [[f32; 4]; 4],
+    number_of_lights: [u32; 4],
+}
+
+impl CameraUniform {
+    pub fn new() -> Self {
+        Self {
+            view_position: [0.0; 4],
+            view_projection: Matrix4::identity().into(),
+            number_of_lights: [0; 4],
+        }
+    }
+
+    pub fn update_view_proj(&mut self, camera: &Camera, projection: &Projection) {
+        self.view_position = camera.position.to_homogeneous().into();
+        self.view_projection = (projection.calc_matrix() * camera.calc_matrix()).into()
+    }
+
+    pub fn set_lights(&mut self, number_of_lights: u32) {
+        self.number_of_lights[0] = number_of_lights.min(MAX_LIGHTS.try_into().unwrap());
+    }
+}
 
 #[derive(Debug)]
 pub struct Camera {
