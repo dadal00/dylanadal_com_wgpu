@@ -1,51 +1,69 @@
-use model::{Material, Mesh, Model, ModelVertex};
-use std::io::{BufReader, Cursor};
+// Standard Library
+use std::{
+    f32::consts::PI,
+    fs::{read, read_to_string},
+    io::{BufReader, Cursor},
+    path::Path,
+};
 
-use wgpu::util::DeviceExt;
+// External
+use anyhow::Result;
+use bytemuck::cast_slice;
+use cgmath::{Vector2, Vector3};
+use tobj::{LoadOptions, load_mtl_buf, load_obj_buf_async};
+use wgpu::{
+    util::{BufferInitDescriptor, DeviceExt},
+    *,
+};
 
-use crate::{model, texture};
+// Web Assembly
+#[cfg(target_arch = "wasm32")]
+use reqwest::{Url, get};
+
+// Internal Modules
+use crate::{
+    model::{Material, Mesh, Model, ModelVertex},
+    texture::Texture,
+};
 
 #[cfg(target_arch = "wasm32")]
-fn format_url(file_name: &str) -> reqwest::Url {
+fn format_url(file_name: &str) -> Url {
     let window = web_sys::window().unwrap();
     let location = window.location();
     let mut origin = location.origin().unwrap();
     if !origin.ends_with("learn-wgpu") {
         origin = format!("{}/learn-wgpu", origin);
     }
-    let base = reqwest::Url::parse(&format!("{}/", origin,)).unwrap();
+    let base = Url::parse(&format!("{}/", origin,)).unwrap();
     base.join(file_name).unwrap()
 }
 
-pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
+pub async fn load_string(file_name: &str) -> Result<String> {
     #[cfg(target_arch = "wasm32")]
     let txt = {
         let url = format_url(file_name);
-        reqwest::get(url).await?.text().await?
+        get(url).await?.text().await?
     };
+
     #[cfg(not(target_arch = "wasm32"))]
     let txt = {
-        let path = std::path::Path::new(env!("OUT_DIR"))
-            .join("res")
-            .join(file_name);
-        std::fs::read_to_string(path)?
+        let path = Path::new(env!("OUT_DIR")).join("res").join(file_name);
+        read_to_string(path)?
     };
 
     Ok(txt)
 }
 
-pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
+pub async fn load_binary(file_name: &str) -> Result<Vec<u8>> {
     #[cfg(target_arch = "wasm32")]
     let data = {
         let url = format_url(file_name);
-        reqwest::get(url).await?.bytes().await?.to_vec()
+        get(url).await?.bytes().await?.to_vec()
     };
     #[cfg(not(target_arch = "wasm32"))]
     let data = {
-        let path = std::path::Path::new(env!("OUT_DIR"))
-            .join("res")
-            .join(file_name);
-        std::fs::read(path)?
+        let path = Path::new(env!("OUT_DIR")).join("res").join(file_name);
+        read(path)?
     };
 
     Ok(data)
@@ -54,34 +72,34 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
 pub async fn load_texture(
     file_name: &str,
     is_normal_map: bool,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> anyhow::Result<texture::Texture> {
+    device: &Device,
+    queue: &Queue,
+) -> Result<Texture> {
     let data = load_binary(file_name).await?;
-    texture::Texture::from_bytes(device, queue, &data, file_name, is_normal_map)
+    Texture::from_bytes(device, queue, &data, file_name, is_normal_map)
 }
 
 pub async fn load_model(
     file_name: &str,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<model::Model> {
+    device: &Device,
+    queue: &Queue,
+    layout: &BindGroupLayout,
+) -> Result<Model> {
     let obj_text = load_string(file_name).await?;
 
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
-    let (models, obj_materials) = tobj::load_obj_buf_async(
+    let (models, obj_materials) = load_obj_buf_async(
         &mut obj_reader,
-        &tobj::LoadOptions {
+        &LoadOptions {
             triangulate: true,
             single_index: true,
             ..Default::default()
         },
         |p| async move {
             let mat_text = load_string(&p).await.unwrap();
-            tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
+            load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
         },
     )
     .await?;
@@ -91,7 +109,7 @@ pub async fn load_model(
         let diffuse_texture = load_texture(&m.diffuse_texture, false, device, queue).await?;
         let normal_texture = load_texture(&m.normal_texture, true, device, queue).await?;
 
-        materials.push(model::Material::new(
+        materials.push(Material::new(
             device,
             &m.name,
             diffuse_texture,
@@ -104,7 +122,7 @@ pub async fn load_model(
         .into_iter()
         .map(|m| {
             let mut vertices = (0..m.mesh.positions.len() / 3)
-                .map(|i| model::ModelVertex {
+                .map(|i| ModelVertex {
                     position: [
                         m.mesh.positions[i * 3],
                         m.mesh.positions[i * 3 + 1],
@@ -116,7 +134,6 @@ pub async fn load_model(
                         m.mesh.normals[i * 3 + 1],
                         m.mesh.normals[i * 3 + 2],
                     ],
-                    // We'll calculate these later
                     tangent: [0.0; 3],
                     bitangent: [0.0; 3],
                 })
@@ -125,21 +142,18 @@ pub async fn load_model(
             let indices = &m.mesh.indices;
             let mut triangles_included = vec![0; vertices.len()];
 
-            // Calculate tangents and bitangets. We're going to
-            // use the triangles, so we need to loop through the
-            // indices in chunks of 3
             for c in indices.chunks(3) {
                 let v0 = vertices[c[0] as usize];
                 let v1 = vertices[c[1] as usize];
                 let v2 = vertices[c[2] as usize];
 
-                let pos0: cgmath::Vector3<_> = v0.position.into();
-                let pos1: cgmath::Vector3<_> = v1.position.into();
-                let pos2: cgmath::Vector3<_> = v2.position.into();
+                let pos0: Vector3<_> = v0.position.into();
+                let pos1: Vector3<_> = v1.position.into();
+                let pos2: Vector3<_> = v2.position.into();
 
-                let uv0: cgmath::Vector2<_> = v0.tex_coords.into();
-                let uv1: cgmath::Vector2<_> = v1.tex_coords.into();
-                let uv2: cgmath::Vector2<_> = v2.tex_coords.into();
+                let uv0: Vector2<_> = v0.tex_coords.into();
+                let uv1: Vector2<_> = v1.tex_coords.into();
+                let uv2: Vector2<_> = v2.tex_coords.into();
 
                 // Calculate the edges of the triangle
                 let delta_pos1 = pos1 - pos0;
@@ -164,17 +178,17 @@ pub async fn load_model(
 
                 // We'll use the same tangent/bitangent for each vertex in the triangle
                 vertices[c[0] as usize].tangent =
-                    (tangent + cgmath::Vector3::from(vertices[c[0] as usize].tangent)).into();
+                    (tangent + Vector3::from(vertices[c[0] as usize].tangent)).into();
                 vertices[c[1] as usize].tangent =
-                    (tangent + cgmath::Vector3::from(vertices[c[1] as usize].tangent)).into();
+                    (tangent + Vector3::from(vertices[c[1] as usize].tangent)).into();
                 vertices[c[2] as usize].tangent =
-                    (tangent + cgmath::Vector3::from(vertices[c[2] as usize].tangent)).into();
+                    (tangent + Vector3::from(vertices[c[2] as usize].tangent)).into();
                 vertices[c[0] as usize].bitangent =
-                    (bitangent + cgmath::Vector3::from(vertices[c[0] as usize].bitangent)).into();
+                    (bitangent + Vector3::from(vertices[c[0] as usize].bitangent)).into();
                 vertices[c[1] as usize].bitangent =
-                    (bitangent + cgmath::Vector3::from(vertices[c[1] as usize].bitangent)).into();
+                    (bitangent + Vector3::from(vertices[c[1] as usize].bitangent)).into();
                 vertices[c[2] as usize].bitangent =
-                    (bitangent + cgmath::Vector3::from(vertices[c[2] as usize].bitangent)).into();
+                    (bitangent + Vector3::from(vertices[c[2] as usize].bitangent)).into();
 
                 // Used to average the tangents/bitangents
                 triangles_included[c[0] as usize] += 1;
@@ -186,22 +200,22 @@ pub async fn load_model(
             for (i, n) in triangles_included.into_iter().enumerate() {
                 let denom = 1.0 / n as f32;
                 let v = &mut vertices[i];
-                v.tangent = (cgmath::Vector3::from(v.tangent) * denom).into();
-                v.bitangent = (cgmath::Vector3::from(v.bitangent) * denom).into();
+                v.tangent = (Vector3::from(v.tangent) * denom).into();
+                v.bitangent = (Vector3::from(v.bitangent) * denom).into();
             }
 
-            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
                 label: Some(&format!("{:?} Vertex Buffer", file_name)),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
+                contents: cast_slice(&vertices),
+                usage: BufferUsages::VERTEX,
             });
-            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let index_buffer = device.create_buffer_init(&BufferInitDescriptor {
                 label: Some(&format!("{:?} Index Buffer", file_name)),
-                contents: bytemuck::cast_slice(&m.mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
+                contents: cast_slice(&m.mesh.indices),
+                usage: BufferUsages::INDEX,
             });
 
-            model::Mesh {
+            Mesh {
                 name: file_name.to_string(),
                 vertex_buffer,
                 index_buffer,
@@ -211,14 +225,15 @@ pub async fn load_model(
         })
         .collect::<Vec<_>>();
 
-    Ok(model::Model { meshes, materials })
+    Ok(Model { meshes, materials })
 }
 
 pub fn create_plane(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
-) -> model::Model {
+    device: &Device,
+    queue: &Queue,
+    layout: &BindGroupLayout,
+    rgba: Color,
+) -> Model {
     let vertices = vec![
         ModelVertex {
             position: [-1.0, 0.0, -1.0],
@@ -252,30 +267,19 @@ pub fn create_plane(
 
     let indices: Vec<u32> = vec![0, 1, 2, 0, 2, 3];
 
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: Some("Plane Vertex Buffer"),
-        contents: bytemuck::cast_slice(&vertices),
-        usage: wgpu::BufferUsages::VERTEX,
+        contents: cast_slice(&vertices),
+        usage: BufferUsages::VERTEX,
     });
-    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let index_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: Some("Plane Index Buffer"),
-        contents: bytemuck::cast_slice(&indices),
-        usage: wgpu::BufferUsages::INDEX,
+        contents: cast_slice(&indices),
+        usage: BufferUsages::INDEX,
     });
 
-    let white_texture = crate::texture::Texture::from_color(
-        device,
-        queue,
-        [255, 255, 255, 255],
-        Some("Plane texture"),
-    );
-    let material = Material::new(
-        device,
-        "white_material",
-        white_texture.clone(),
-        white_texture,
-        layout,
-    );
+    let texture = Texture::from_color(device, queue, rgba, Some("Plane texture"));
+    let material = Material::new(device, "white_material", texture.clone(), texture, layout);
 
     let mesh = Mesh {
         name: "plane".to_string(),
@@ -292,23 +296,24 @@ pub fn create_plane(
 }
 
 pub fn create_sphere(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
+    device: &Device,
+    queue: &Queue,
+    layout: &BindGroupLayout,
     radius: f32,
     latitude_segments: u32,
     longitude_segments: u32,
-) -> model::Model {
+    rgba: Color,
+) -> Model {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
     for y in 0..=latitude_segments {
-        let theta = y as f32 / latitude_segments as f32 * std::f32::consts::PI;
+        let theta = y as f32 / latitude_segments as f32 * PI;
         let sin_theta = theta.sin();
         let cos_theta = theta.cos();
 
         for x in 0..=longitude_segments {
-            let phi = x as f32 / longitude_segments as f32 * 2.0 * std::f32::consts::PI;
+            let phi = x as f32 / longitude_segments as f32 * 2.0 * PI;
             let sin_phi = phi.sin();
             let cos_phi = phi.cos();
 
@@ -351,23 +356,18 @@ pub fn create_sphere(
         }
     }
 
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: Some("Sphere Vertex Buffer"),
-        contents: bytemuck::cast_slice(&vertices),
-        usage: wgpu::BufferUsages::VERTEX,
+        contents: cast_slice(&vertices),
+        usage: BufferUsages::VERTEX,
     });
-    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let index_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label: Some("Sphere Index Buffer"),
-        contents: bytemuck::cast_slice(&indices),
-        usage: wgpu::BufferUsages::INDEX,
+        contents: cast_slice(&indices),
+        usage: BufferUsages::INDEX,
     });
 
-    let white_texture = crate::texture::Texture::from_color(
-        device,
-        queue,
-        [255, 255, 255, 255],
-        Some("Sphere texture"),
-    );
+    let white_texture = Texture::from_color(device, queue, rgba, Some("Sphere texture"));
     let material = Material::new(
         device,
         "white_material",
@@ -378,6 +378,242 @@ pub fn create_sphere(
 
     let mesh = Mesh {
         name: "sphere".to_string(),
+        vertex_buffer,
+        index_buffer,
+        num_elements: indices.len() as u32,
+        material: 0,
+    };
+
+    Model {
+        meshes: vec![mesh],
+        materials: vec![material],
+    }
+}
+
+pub fn create_cube(
+    device: &Device,
+    queue: &Queue,
+    layout: &BindGroupLayout,
+    size: f32,
+    rgba: Color,
+) -> Model {
+    let half = size / 2.0;
+
+    // Define 8 corners of the cube
+    let positions = [
+        // Front face
+        [-half, -half, half],
+        [half, -half, half],
+        [half, half, half],
+        [-half, half, half],
+        // Back face
+        [-half, -half, -half],
+        [half, -half, -half],
+        [half, half, -half],
+        [-half, half, -half],
+    ];
+
+    let vertices = [
+        // Front
+        ModelVertex {
+            position: positions[0],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[1],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[2],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[3],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        // Back
+        ModelVertex {
+            position: positions[5],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [-1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[4],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [-1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[7],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [-1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[6],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [-1.0, 0.0, 0.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        // Left
+        ModelVertex {
+            position: positions[4],
+            normal: [-1.0, 0.0, 0.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [0.0, 0.0, -1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[0],
+            normal: [-1.0, 0.0, 0.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [0.0, 0.0, -1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[3],
+            normal: [-1.0, 0.0, 0.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [0.0, 0.0, -1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[7],
+            normal: [-1.0, 0.0, 0.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [0.0, 0.0, -1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        // Right
+        ModelVertex {
+            position: positions[1],
+            normal: [1.0, 0.0, 0.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [0.0, 0.0, 1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[5],
+            normal: [1.0, 0.0, 0.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [0.0, 0.0, 1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[6],
+            normal: [1.0, 0.0, 0.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [0.0, 0.0, 1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        ModelVertex {
+            position: positions[2],
+            normal: [1.0, 0.0, 0.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [0.0, 0.0, 1.0],
+            bitangent: [0.0, 1.0, 0.0],
+        },
+        // Top
+        ModelVertex {
+            position: positions[3],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, -1.0],
+        },
+        ModelVertex {
+            position: positions[2],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, -1.0],
+        },
+        ModelVertex {
+            position: positions[6],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, -1.0],
+        },
+        ModelVertex {
+            position: positions[7],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, -1.0],
+        },
+        // Bottom
+        ModelVertex {
+            position: positions[4],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [0.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        ModelVertex {
+            position: positions[5],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [1.0, 1.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        ModelVertex {
+            position: positions[1],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+        ModelVertex {
+            position: positions[0],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [0.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+        },
+    ];
+
+    let indices: Vec<u32> = (0..6)
+        .flat_map(|i| {
+            let base = i * 4;
+            [base, base + 1, base + 2, base, base + 2, base + 3]
+        })
+        .collect();
+
+    let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
+        label: Some("Cube Vertex Buffer"),
+        contents: cast_slice(&vertices),
+        usage: BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&BufferInitDescriptor {
+        label: Some("Cube Index Buffer"),
+        contents: cast_slice(&indices),
+        usage: BufferUsages::INDEX,
+    });
+
+    let texture = Texture::from_color(device, queue, rgba, Some("Cube Texture"));
+
+    let material = Material::new(device, "cube_material", texture.clone(), texture, layout);
+
+    let mesh = Mesh {
+        name: "cube".to_string(),
         vertex_buffer,
         index_buffer,
         num_elements: indices.len() as u32,
