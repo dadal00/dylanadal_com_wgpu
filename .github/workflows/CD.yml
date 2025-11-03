@@ -6,7 +6,7 @@ on:
       - "**"
 
 jobs:
-  build-and-sync:
+  build-and-deploy-wasm:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
         run: |
           rm -rf dylanadal_com/src/lib/pkg
           mkdir -p dylanadal_com/src/lib/pkg
-          cp -r pkg dylanadal_com/src/lib/pkg
+          cp -r pkg/* dylanadal_com/src/lib/pkg
 
       - name: Commit and push changes for website repository
         run: |
