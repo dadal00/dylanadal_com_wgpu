@@ -5,6 +5,27 @@ use wgpu::{
 };
 use winit::dpi::PhysicalSize;
 
+pub fn load_shader<'a>(shader_name: &str) -> ShaderModuleDescriptor<'a> {
+    match shader_name {
+        "object" => include_wgsl!("../shaders/object.wgsl"),
+        "light" => include_wgsl!("../shaders/light.wgsl"),
+        "hdr" => include_wgsl!("../shaders/hdr.wgsl"),
+        _ => panic!("Unknown shader: {}", shader_name),
+    }
+}
+
+pub fn create_pipeline_layout(
+    device: &Device,
+    label: &str,
+    bind_group_layouts: &[&BindGroupLayout],
+) -> PipelineLayout {
+    device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some(label),
+        bind_group_layouts,
+        push_constant_ranges: &[],
+    })
+}
+
 pub fn create_bind_group(
     device: &Device,
     bind_group_layout: &BindGroupLayout,

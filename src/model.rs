@@ -9,13 +9,13 @@ use wgpu::*;
 // Internal Module
 use crate::texture::Texture;
 
-pub struct Instance {
+pub struct _Instance {
     pub position: Vector3<f32>,
     pub rotation: Quaternion<f32>,
     pub scale: Vector3<f32>,
 }
 
-impl Instance {
+impl _Instance {
     pub fn to_raw(&self) -> InstanceRaw {
         let scale_matrix = Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
 
@@ -30,7 +30,7 @@ impl Instance {
         }
     }
 
-    pub fn to_raw_vec(instances: &Vec<Instance>) -> Vec<InstanceRaw> {
+    pub fn to_raw_vec(instances: &Vec<_Instance>) -> Vec<InstanceRaw> {
         instances.iter().map(Self::to_raw).collect()
     }
 }

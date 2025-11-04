@@ -2,7 +2,10 @@
 use wgpu::*;
 
 // Internal Modules
-use crate::{texture::Texture, utils::create_render_pipeline};
+use crate::{
+    texture::Texture,
+    utils::{create_bind_group, create_pipeline_layout, create_render_pipeline, load_shader},
+};
 
 pub struct HdrPipeline {
     pipeline: RenderPipeline,
@@ -16,6 +19,7 @@ pub struct HdrPipeline {
 
 impl HdrPipeline {
     pub fn new(device: &Device, config: &SurfaceConfiguration) -> Self {
+        // Odd bug where hdr breaks if at some point width + height 0
         let width = config.width.max(1);
         let height = config.height.max(1);
 
@@ -57,36 +61,24 @@ impl HdrPipeline {
                 },
             ],
         });
-        let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Hdr::bind_group"),
-            layout: &layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&texture.view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&texture.sampler),
-                },
+        let bind_group = create_bind_group(
+            &device,
+            &layout,
+            &[
+                BindingResource::TextureView(&texture.view),
+                BindingResource::Sampler(&texture.sampler),
             ],
-        });
-
-        let shader = include_wgsl!("../shaders/hdr.wgsl");
-        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
-        });
+            "HDR Bind Group",
+        );
 
         let pipeline = create_render_pipeline(
             device,
-            &pipeline_layout,
+            &create_pipeline_layout(&device, "HDR Pipeline Layout", &[&layout]),
             Some(config.format.add_srgb_suffix()),
             None,
             &[],
             PrimitiveTopology::TriangleList,
-            shader,
+            load_shader("hdr"),
         );
 
         Self {
@@ -106,25 +98,22 @@ impl HdrPipeline {
             device,
             width,
             height,
-            TextureFormat::Rgba16Float,
+            self.format,
             TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
             FilterMode::Nearest,
             Some("Hdr::texture"),
         );
-        self.bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Hdr::bind_group"),
-            layout: &self.layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&self.texture.view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&self.texture.sampler),
-                },
+
+        self.bind_group = create_bind_group(
+            &device,
+            &self.layout,
+            &[
+                BindingResource::TextureView(&self.texture.view),
+                BindingResource::Sampler(&self.texture.sampler),
             ],
-        });
+            "HDR Bind Group",
+        );
+
         self.width = width;
         self.height = height;
     }

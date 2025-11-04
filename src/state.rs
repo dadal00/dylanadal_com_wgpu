@@ -11,19 +11,13 @@ use winit::{event::*, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Wi
 
 // Internal Modules
 use crate::{
-    camera::{
-        Camera, CameraController, CameraUniform, Projection, create_camera_bind_group_layout,
-    },
+    camera::*,
     hdr::HdrPipeline,
-    light::{Light, LightRaw, MAX_LIGHT_UNIFORMS_SIZE, create_lights_bind_group_layout},
-    model::{DrawLight, DrawModel, Instance, InstanceRaw, Model, ModelVertex, Vertex},
+    light::*,
+    model::*,
     resources::{create_plane, create_sphere},
     texture::{Texture, create_texture_bind_group_layout},
-    utils::{
-        configure_surface, create_adapter, create_bind_group, create_buffer,
-        create_render_pipeline, create_wgpu_instance, format_surface, get_device_and_queue,
-        init_buffer,
-    },
+    utils::*,
 };
 
 pub struct State {
@@ -44,10 +38,10 @@ pub struct State {
     camera_buffer: Buffer,
     camera_bind_group: BindGroup,
 
-    instances: Vec<Instance>,
+    instances: Vec<_Instance>,
     instance_buffer: Buffer,
 
-    light_instances: Vec<Instance>,
+    light_instances: Vec<_Instance>,
     light_instance_buffer: Buffer,
 
     depth_texture: Texture,
@@ -65,20 +59,16 @@ pub struct State {
 impl State {
     pub async fn new(window: Arc<Window>) -> Result<State> {
         let size = window.inner_size();
-
         let instance = create_wgpu_instance();
 
         let surface = instance.create_surface(window.clone()).unwrap();
-
         let adapter = create_adapter(&instance, &surface).await;
         let (device, queue) = get_device_and_queue(&adapter).await;
+        let texture_bind_group_layout = create_texture_bind_group_layout(&device);
 
         let surface_capabilities = surface.get_capabilities(&adapter);
-
         let surface_format = format_surface(&surface_capabilities);
         let surface_config = configure_surface(&surface_format, &surface_capabilities, &size);
-
-        let texture_bind_group_layout = create_texture_bind_group_layout(&device);
 
         let camera = Camera::new((0.0, 5.0, 10.0), Deg(-90.0), Deg(-20.0));
         let projection = Projection::new(
@@ -123,7 +113,7 @@ impl State {
             BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         );
 
-        let instances = vec![Instance {
+        let instances = vec![_Instance {
             position: Vector3 {
                 x: 0.0,
                 y: 0.0,
@@ -133,7 +123,7 @@ impl State {
             scale: Vector3::new(100.0, 1.0, 100.0),
         }];
 
-        let instance_data = Instance::to_raw_vec(&instances);
+        let instance_data = _Instance::to_raw_vec(&instances);
         let instance_buffer = init_buffer(
             &device,
             "Instance Buffer",
@@ -172,9 +162,9 @@ impl State {
             },
         );
 
-        let light_instances: Vec<Instance> = lights
+        let light_instances: Vec<_Instance> = lights
             .iter()
-            .map(|light| Instance {
+            .map(|light| _Instance {
                 position: Vector3 {
                     x: light.pos.x,
                     y: light.pos.y,
@@ -185,7 +175,7 @@ impl State {
             })
             .collect();
 
-        let light_instance_data = Instance::to_raw_vec(&light_instances);
+        let light_instance_data = _Instance::to_raw_vec(&light_instances);
 
         let light_instance_buffer = init_buffer(
             &device,
@@ -220,52 +210,37 @@ impl State {
 
         let hdr = HdrPipeline::new(&device, &surface_config);
 
-        let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[
-                &texture_bind_group_layout,
-                &camera_bind_group_layout,
-                &light_bind_group_layout,
-            ],
-            push_constant_ranges: &[],
-        });
-
-        let render_pipeline = {
-            let shader = ShaderModuleDescriptor {
-                label: Some("Normal Shader"),
-                source: ShaderSource::Wgsl(include_str!("../shaders/shader.wgsl").into()),
-            };
-            create_render_pipeline(
+        let render_pipeline = create_render_pipeline(
+            &device,
+            &create_pipeline_layout(
                 &device,
-                &render_pipeline_layout,
-                Some(hdr.format()),
-                Some(Texture::DEPTH_FORMAT),
-                &[ModelVertex::desc(), InstanceRaw::desc()],
-                PrimitiveTopology::TriangleList,
-                shader,
-            )
-        };
+                "Render Pipeline Layout",
+                &[
+                    &texture_bind_group_layout,
+                    &camera_bind_group_layout,
+                    &light_bind_group_layout,
+                ],
+            ),
+            Some(hdr.format()),
+            Some(Texture::DEPTH_FORMAT),
+            &[ModelVertex::desc(), InstanceRaw::desc()],
+            PrimitiveTopology::TriangleList,
+            load_shader("object"),
+        );
 
-        let light_render_pipeline = {
-            let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("Light Pipeline Layout"),
-                bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-            let shader = ShaderModuleDescriptor {
-                label: Some("Light Shader"),
-                source: ShaderSource::Wgsl(include_str!("../shaders/light.wgsl").into()),
-            };
-            create_render_pipeline(
+        let light_render_pipeline = create_render_pipeline(
+            &device,
+            &create_pipeline_layout(
                 &device,
-                &layout,
-                Some(hdr.format()),
-                Some(Texture::DEPTH_FORMAT),
-                &[ModelVertex::desc(), InstanceRaw::desc()],
-                PrimitiveTopology::TriangleList,
-                shader,
-            )
-        };
+                "Light Pipeline Layout",
+                &[&texture_bind_group_layout, &camera_bind_group_layout],
+            ),
+            Some(hdr.format()),
+            Some(Texture::DEPTH_FORMAT),
+            &[ModelVertex::desc(), InstanceRaw::desc()],
+            PrimitiveTopology::TriangleList,
+            load_shader("light"),
+        );
 
         Ok(Self {
             window,
