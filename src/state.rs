@@ -12,9 +12,10 @@ use winit::{event::*, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Wi
 // Internal Modules
 use crate::{
     camera::*,
+    draw::*,
     hdr::HdrPipeline,
     light::*,
-    model::*,
+    models::*,
     resources::{create_plane, create_sphere},
     texture::{Texture, create_texture_bind_group_layout},
     utils::*,
@@ -27,9 +28,11 @@ pub struct State {
     queue: Queue,
     surface_config: SurfaceConfiguration,
 
-    render_pipeline: RenderPipeline,
+    main_render_pipeline: RenderPipeline,
+    plane_model: Model,
+
+    light_render_pipeline: RenderPipeline,
     light_model: Model,
-    obj_model: Model,
 
     camera: Camera,
     projection: Projection,
@@ -38,8 +41,8 @@ pub struct State {
     camera_buffer: Buffer,
     camera_bind_group: BindGroup,
 
-    instances: Vec<_Instance>,
-    instance_buffer: Buffer,
+    planes: Vec<_Instance>,
+    planes_buffer: Buffer,
 
     light_instances: Vec<_Instance>,
     light_instance_buffer: Buffer,
@@ -50,7 +53,6 @@ pub struct State {
     lights: Vec<Light>,
     light_buffer: Buffer,
     light_bind_group: BindGroup,
-    light_render_pipeline: RenderPipeline,
 
     pub mouse_pressed: bool,
     hdr: HdrPipeline,
@@ -113,7 +115,7 @@ impl State {
             BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         );
 
-        let instances = vec![_Instance {
+        let planes = vec![_Instance {
             position: Vector3 {
                 x: 0.0,
                 y: 0.0,
@@ -123,11 +125,11 @@ impl State {
             scale: Vector3::new(100.0, 1.0, 100.0),
         }];
 
-        let instance_data = _Instance::to_raw_vec(&instances);
-        let instance_buffer = init_buffer(
+        let plane_data = _Instance::to_raw_vec(&planes);
+        let planes_buffer = init_buffer(
             &device,
             "Instance Buffer",
-            &instance_data,
+            &plane_data,
             BufferUsages::VERTEX,
         );
 
@@ -150,7 +152,7 @@ impl State {
             lights[1].color,
         );
 
-        let obj_model = create_plane(
+        let plane_model = create_plane(
             &device,
             &queue,
             &texture_bind_group_layout,
@@ -210,7 +212,7 @@ impl State {
 
         let hdr = HdrPipeline::new(&device, &surface_config);
 
-        let render_pipeline = create_render_pipeline(
+        let main_render_pipeline = create_render_pipeline(
             &device,
             &create_pipeline_layout(
                 &device,
@@ -249,9 +251,9 @@ impl State {
             queue,
             surface_config,
 
-            render_pipeline,
+            main_render_pipeline,
             light_model,
-            obj_model,
+            plane_model,
 
             camera,
             projection,
@@ -260,8 +262,8 @@ impl State {
             camera_bind_group,
             camera_uniform,
 
-            instances,
-            instance_buffer,
+            planes,
+            planes_buffer,
 
             light_instances,
             light_instance_buffer,
@@ -286,7 +288,6 @@ impl State {
 
             self.surface_config.width = width;
             self.surface_config.height = height;
-
             self.surface.configure(&self.device, &self.surface_config);
             self.is_surface_configured = true;
 
@@ -320,19 +321,111 @@ impl State {
         self.camera_controller.handle_scroll(delta);
     }
 
-    pub fn update(&mut self, dt: Duration) {
-        self.camera_controller.update_camera(&mut self.camera, dt);
+    pub fn update(&mut self, delta_time: Duration) {
+        self.update_camera(delta_time);
+        self.update_lights(delta_time);
+    }
+
+    pub fn render(&mut self) -> Result<(), SurfaceError> {
+        self.window.request_redraw();
+
+        if !self.is_surface_configured {
+            return Ok(());
+        }
+
+        let (surface_texture, texture_view) = self.get_texture_and_view()?;
+        let mut command_encoder = self.get_encoder();
+
+        {
+            let mut render_pass = self.create_main_render_pass(&mut command_encoder);
+
+            self.render_lights(&mut render_pass);
+            self.render_plane(&mut render_pass);
+        }
+
+        self.hdr.process(&mut command_encoder, &texture_view);
+        self.queue.submit(once(command_encoder.finish()));
+        surface_texture.present();
+
+        Ok(())
+    }
+
+    fn render_plane<'b: 'a, 'a>(&'b self, render_pass: &mut RenderPass<'a>) {
+        self.render_objects(
+            render_pass,
+            &self.planes_buffer,
+            &self.main_render_pipeline,
+            &self.plane_model,
+            self.planes.len() as u32,
+            &self.camera_bind_group,
+            Some(&self.light_bind_group),
+        );
+    }
+
+    fn render_lights<'this: 'render, 'render>(&'this self, render_pass: &mut RenderPass<'render>) {
+        self.render_objects(
+            render_pass,
+            &self.light_instance_buffer,
+            &self.light_render_pipeline,
+            &self.light_model,
+            self.light_instances.len() as u32,
+            &self.camera_bind_group,
+            None,
+        );
+    }
+
+    fn render_objects<'b: 'a, 'a>(
+        &'b self,
+        render_pass: &mut RenderPass<'a>,
+        instance_buffer: &Buffer,
+        render_pipeline: &RenderPipeline,
+        model: &'a Model,
+        num_instances: u32,
+        camera_bind_group: &'a BindGroup,
+        light_bind_group: Option<&'a BindGroup>,
+    ) {
+        render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
+        render_pass.set_pipeline(render_pipeline);
+        render_pass.draw_model_instanced(
+            model,
+            0..num_instances,
+            camera_bind_group,
+            light_bind_group,
+        );
+    }
+
+    fn get_encoder(&self) -> CommandEncoder {
+        self.device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("Main Render Encoder"),
+            })
+    }
+
+    fn get_texture_and_view(&self) -> Result<((SurfaceTexture, TextureView)), SurfaceError> {
+        let surface_texture = self.surface.get_current_texture()?;
+        let texture_view = surface_texture
+            .texture
+            .create_view(&TextureViewDescriptor::default());
+
+        Ok((surface_texture, texture_view))
+    }
+
+    fn update_camera(&mut self, delta_time: Duration) {
+        self.camera_controller
+            .update_camera(&mut self.camera, delta_time);
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
 
         self.queue
             .write_buffer(&self.camera_buffer, 0, cast_slice(&[self.camera_uniform]));
+    }
 
+    fn update_lights(&mut self, delta_time: Duration) {
         for (i, light) in self.lights.iter_mut().enumerate() {
             let old_pos: Vector3<f32> = [light.pos.x, light.pos.y, light.pos.z].into();
 
             let rotation =
-                Quaternion::from_axis_angle(Vector3::unit_y(), Deg(PI * dt.as_secs_f32()));
+                Quaternion::from_axis_angle(Vector3::unit_y(), Deg(PI * delta_time.as_secs_f32()));
 
             let new_pos = rotation * old_pos;
 
@@ -357,75 +450,36 @@ impl State {
         }
     }
 
-    pub fn render(&mut self) -> Result<(), SurfaceError> {
-        self.window.request_redraw();
-
-        if !self.is_surface_configured {
-            return Ok(());
-        }
-
-        let output = self.surface.get_current_texture()?;
-        let view = output
-            .texture
-            .create_view(&TextureViewDescriptor::default());
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
-
-        {
-            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: self.hdr.view(),
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture.view,
-                    depth_ops: Some(Operations {
-                        load: LoadOp::Clear(1.0),
-                        store: StoreOp::Store,
+    fn create_main_render_pass<'a>(
+        &self,
+        command_encoder: &'a mut CommandEncoder,
+    ) -> RenderPass<'a> {
+        command_encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("Main Render Pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: self.hdr.view(),
+                resolve_target: None,
+                ops: Operations {
+                    load: LoadOp::Clear(Color {
+                        r: 0.1,
+                        g: 0.2,
+                        b: 0.7,
+                        a: 1.0,
                     }),
-                    stencil_ops: None,
+                    store: StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                view: &self.depth_texture.view,
+                depth_ops: Some(Operations {
+                    load: LoadOp::Clear(1.0),
+                    store: StoreOp::Store,
                 }),
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
-
-            render_pass.set_vertex_buffer(1, self.light_instance_buffer.slice(..));
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model_instanced(
-                &self.light_model,
-                0..self.light_instances.len() as u32,
-                &self.camera_bind_group,
-            );
-
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.draw_model_instanced(
-                &self.obj_model,
-                0..self.instances.len() as u32,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
-        }
-        self.hdr.process(&mut encoder, &view);
-
-        self.queue.submit(once(encoder.finish()));
-        output.present();
-
-        Ok(())
+                stencil_ops: None,
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        })
     }
 }

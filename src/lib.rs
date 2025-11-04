@@ -22,9 +22,10 @@ use {
 
 // Module Declaration
 mod camera;
+mod draw;
 mod hdr;
 mod light;
-mod model;
+mod models;
 mod resources;
 mod state;
 mod texture;
@@ -32,6 +33,9 @@ mod utils;
 
 // Internal Module
 use state::State;
+
+#[cfg(target_arch = "wasm32")]
+const CANVAS_ID: &str = "canvas";
 
 pub struct App {
     #[cfg(target_arch = "wasm32")]
@@ -61,12 +65,11 @@ impl ApplicationHandler<State> for App {
 
         #[cfg(target_arch = "wasm32")]
         {
-            const CANVAS_ID: &str = "canvas";
-
             let window = web_sys::window().unwrap_throw();
             let document = window.document().unwrap_throw();
             let canvas = document.get_element_by_id(CANVAS_ID).unwrap_throw();
             let html_canvas_element = canvas.unchecked_into();
+
             window_attributes = window_attributes.with_canvas(Some(html_canvas_element));
         }
 
@@ -74,7 +77,6 @@ impl ApplicationHandler<State> for App {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // If we are not on web we can use pollster to await
             self.state = Some(pollster::block_on(State::new(window)).unwrap());
         }
 
@@ -106,6 +108,7 @@ impl ApplicationHandler<State> for App {
                 event.window.inner_size().height,
             );
         }
+
         self.state = Some(event);
     }
 
@@ -120,6 +123,7 @@ impl ApplicationHandler<State> for App {
         } else {
             return;
         };
+
         match event {
             DeviceEvent::MouseMotion { delta: (dx, dy) } => {
                 if state.mouse_pressed {

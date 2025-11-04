@@ -22,7 +22,7 @@ use reqwest::{Url, get};
 
 // Internal Modules
 use crate::{
-    model::{Material, Mesh, Model, ModelVertex},
+    models::{Material, Mesh, Model, ModelVertex},
     texture::Texture,
 };
 
